@@ -1,6 +1,5 @@
 import { CapabilityReference, Component, Device } from '@smartthings/core-sdk';
-import { TargetHeaterCoolerState } from 'hap-nodejs/dist/lib/definitions';
-import { Service, PlatformAccessory, CharacteristicValue } from 'homebridge';
+import { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 import { DeviceAdapter } from './deviceAdapter';
 import { SmartThingsPlatform } from './platform';
 import { PlatformStatusInfo } from './platformStatusInfo';
@@ -8,6 +7,12 @@ import { PlatformStatusInfo } from './platformStatusInfo';
 const defaultUpdateInterval = 15;
 const defaultMinTemperature = 16;
 const defaultMaxTemperature = 30;
+
+enum TargetHeaterCoolerState {
+  AUTO = 0,
+  HEAT = 1,
+  COOL = 2
+}
 
 export class SmartThingsAirConditionerAccessory {
   private service: Service;

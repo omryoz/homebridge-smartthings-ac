@@ -52,21 +52,37 @@ OAuth authentication automatically handles token refresh and provides a more sec
    npm install -g @smartthings/cli
    ```
 
-2. Create a new SmartApp:
+2. Login to SmartThings:
+   ```bash
+   smartthings login
+   ```
+   This will open your browser to authenticate with your Samsung/SmartThings account.
+
+3. Create a new SmartApp:
    ```bash
    smartthings apps:create
    ```
 
-3. Follow the prompts:
+4. Follow the interactive prompts:
    - **Display Name**: `Homebridge SmartThings AC`
    - **Description**: `Homebridge plugin for SmartThings Air Conditioner control`
-   - **Target URL**: Leave blank for now
-   - **Permissions**: Select all device permissions (x:devices:*, r:devices:*, l:devices)
+   - **Target URL**: Leave blank (just press Enter)
+   - **Permissions**: Select these device permissions:
+     - `r:devices:*` (Read/See all devices)
+     - `w:devices:*` (Write/Control all devices)
    - **Redirect URIs**: `http://localhost:3000/oauth/callback`
 
-4. Note your `client_id` and `client_secret` from the output.
+5. **Save your credentials!** The CLI will output something like:
+   ```
+   ✅  App created successfully
+   App ID: 12345678-1234-1234-1234-123456789012
+   Client ID: abcdef12-3456-7890-abcd-ef1234567890
+   Client Secret: xyz789-def0-1234-5678-9abcdef01234
+   ```
 
 #### 2. Configure the Plugin
+
+Use your `clientId` and `clientSecret` in your Homebridge config.json:
 
 ```json
 {
@@ -88,10 +104,11 @@ OAuth authentication automatically handles token refresh and provides a more sec
 #### 3. Complete OAuth Authorization
 
 1. Restart Homebridge
-2. Check the logs for the authorization URL
+2. Check the logs for the authorization URL (it will look like: `https://auth-global.api.smartthings.com/oauth/authorize?...`)
 3. Visit the URL in your browser
 4. Log in to SmartThings and authorize the app
-5. You'll be redirected back and the plugin will automatically save the tokens
+5. You'll be redirected back to `http://localhost:3000/oauth/callback` and the plugin will automatically save the tokens
+6. The plugin will now work with automatic token refresh
 
 ### Option 2: Personal Access Token (Legacy)
 

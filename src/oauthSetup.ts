@@ -120,6 +120,8 @@ export class OAuthSetup {
         const certPath = path.join(os.homedir(), 'ssl-certs');
         const certFile = path.join(certPath, 'cert.pem');
         const keyFile = path.join(certPath, 'key.pem');
+        this.log.debug('Cert file:', certFile);
+        this.log.debug('Key file:', keyFile);
 
         try {
           const cert = fs.readFileSync(certFile);

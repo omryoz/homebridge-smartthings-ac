@@ -1,5 +1,5 @@
 import { Logger } from 'homebridge';
-import { OAuthManager, OAuthConfig } from './oauthManager';
+import { OAuthManager } from './oauthManager';
 import * as http from 'http';
 import * as https from 'https';
 import * as url from 'url';
@@ -31,7 +31,7 @@ export class OAuthSetup {
           const parsedUrl = url.parse(req.url!, true);
 
           if (parsedUrl.pathname === '/oauth/callback') {
-            const { code, state, error } = parsedUrl.query as any;
+            const { code, state, error } = parsedUrl.query;
 
             if (error) {
               res.writeHead(400, { 'Content-Type': 'text/html' });
@@ -77,7 +77,7 @@ export class OAuthSetup {
             }
 
             // Exchange the authorization code for tokens
-            await this.oauthManager.exchangeCodeForTokens(code);
+            await this.oauthManager.exchangeCodeForTokens(code as string);
 
             res.writeHead(200, { 'Content-Type': 'text/html' });
             res.end(`

@@ -34,7 +34,7 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
     } else if (this.config.token) {
       await this.initializeLegacyToken();
     } else {
-      this.log.error('No authentication method configured. Please set up either OAuth (clientId/clientSecret) or a Personal Access Token (token).');
+      this.log.error('No authentication method configured. Please set up either OAuth or a Personal Access Token (token).');
       return;
     }
 
@@ -82,7 +82,7 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
         clientId: clientId,
         clientSecret: clientSecret,
         redirectUri: this.config.redirectUri || 'https://raspberrypi.local:3000/oauth/callback',
-        scope: 'r:locations:*,r:devices:$,x:devices:*,w:devices:$,r:devices:*,w:devices:*,x:devices:$',
+        scope: 'r:devices:* w:devices:* x:devices:* r:locations:*',
       };
 
       this.oauthManager = new OAuthManager(this.log, oauthConfig, storagePath);
@@ -162,11 +162,11 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
     try {
       const devices = await this.client.devices.list();
       this.handleDevices(devices);
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.log.error('Cannot load devices:', error);
 
       // If using OAuth and token refresh failed, try to re-authenticate
-      if (this.oauthManager && error.response?.status === 401) {
+      if (this.oauthManager && (error as { response?: { status: number } }).response?.status === 401) {
         this.log.info('Token expired, attempting to refresh...');
         try {
           const accessToken = await this.oauthManager.getValidAccessToken();

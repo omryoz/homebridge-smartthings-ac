@@ -8,6 +8,7 @@ import { OAuthManager, OAuthConfig } from './oauthManager';
 import { OAuthSetup } from './oauthSetup';
 import * as path from 'path';
 import * as os from 'os';
+import * as fs from 'fs/promises';
 
 export class SmartThingsPlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service = this.api.hap.Service;
@@ -45,11 +46,41 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
 
   private async initializeOAuth() {
     try {
-      const storagePath = path.join(os.homedir(), '.homebridge', 'smartthings-oauth-tokens.json');
+      // Use a more reliable path for token storage
+      const homeDir = process.env.HOME || process.env.USERPROFILE || os.homedir();
+      const storagePath = path.join(homeDir, '.homebridge', 'smartthings-oauth-tokens.json');
+
+      this.log.debug('OAuth token storage path:', storagePath);
+      this.log.debug('Home directory:', homeDir);
+
+      // Debug OAuth configuration (masked)
+      const clientId = this.config.clientId as string;
+      const clientSecret = this.config.clientSecret as string;
+
+      if (clientId) {
+        const maskedClientId = clientId.length > 8 ?
+          clientId.substring(0, 4) + '...' + clientId.substring(clientId.length - 4) :
+          '***';
+        this.log.debug('Client ID (masked):', maskedClientId);
+      } else {
+        this.log.debug('Client ID: NOT CONFIGURED');
+      }
+
+      if (clientSecret) {
+        const maskedSecret = clientSecret.length > 8 ?
+          clientSecret.substring(0, 4) + '...' + clientSecret.substring(clientSecret.length - 4) :
+          '***';
+        this.log.debug('Client Secret (masked):', maskedSecret);
+      } else {
+        this.log.debug('Client Secret: NOT CONFIGURED');
+      }
+
+      // Check for existing token files in common locations
+      await this.checkForExistingTokens();
 
       const oauthConfig: OAuthConfig = {
-        clientId: this.config.clientId as string,
-        clientSecret: this.config.clientSecret as string,
+        clientId: clientId,
+        clientSecret: clientSecret,
         redirectUri: this.config.redirectUri || 'http://localhost:3000/oauth/callback',
         scope: 'r:devices:* w:devices:*',
       };
@@ -69,6 +100,24 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
       this.log.info('OAuth authentication initialized successfully');
     } catch (error) {
       this.log.error('Failed to initialize OAuth:', error);
+    }
+  }
+
+  private async checkForExistingTokens() {
+    const commonPaths = [
+      '/home/homebridge/.homebridge/smartthings-oauth-tokens.json',
+      '/var/lib/homebridge/smartthings-oauth-tokens.json',
+      path.join(process.env.HOME || '', '.homebridge', 'smartthings-oauth-tokens.json'),
+      path.join(os.homedir(), '.homebridge', 'smartthings-oauth-tokens.json'),
+    ];
+
+    for (const tokenPath of commonPaths) {
+      try {
+        await fs.access(tokenPath);
+        this.log.debug('Found existing OAuth tokens at:', tokenPath);
+      } catch (error) {
+        this.log.debug('No tokens found at:', tokenPath);
+      }
     }
   }
 

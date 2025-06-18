@@ -135,14 +135,28 @@ export class OAuthManager {
    */
   async loadTokens(): Promise<void> {
     try {
+      this.log.debug('Attempting to load OAuth tokens from:', this.storagePath);
+
+      // Check if file exists first
+      try {
+        await fs.access(this.storagePath);
+        this.log.debug('OAuth tokens file exists');
+      } catch (accessError) {
+        this.log.debug('OAuth tokens file does not exist:', this.storagePath);
+        return;
+      }
+
       const data = await fs.readFile(this.storagePath, 'utf8');
+      this.log.debug('File contents length:', data.length);
+
       this.tokens = JSON.parse(data);
       if (this.tokens) {
         this.tokenExpiry = Date.now() + (this.tokens.expires_in * 1000);
+        this.log.debug('OAuth tokens loaded successfully, expires at:', new Date(this.tokenExpiry));
       }
       this.log.debug('OAuth tokens loaded from storage');
     } catch (error) {
-      this.log.debug('No stored OAuth tokens found');
+      this.log.debug('No stored OAuth tokens found:', error);
     }
   }
 

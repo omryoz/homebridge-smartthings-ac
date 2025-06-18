@@ -82,7 +82,7 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
         clientId: clientId,
         clientSecret: clientSecret,
         redirectUri: this.config.redirectUri || 'http://localhost:3000/oauth/callback',
-        scope: 'r:locations:*,w:devices:*,x:devices:*',
+        scope: 'r:devices:* w:devices:* x:devices:* r:locations:*',
       };
 
       this.oauthManager = new OAuthManager(this.log, oauthConfig, storagePath);

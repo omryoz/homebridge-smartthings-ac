@@ -82,7 +82,7 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
         clientId: clientId,
         clientSecret: clientSecret,
         redirectUri: this.config.redirectUri || 'https://raspberrypi.local:3000/oauth/callback',
-        scope: 'r:devices:* w:devices:* x:devices:* r:locations:*',
+        scope: 'r:locations:*,r:devices:$,x:devices:*,w:devices:$,r:devices:*,w:devices:*,x:devices:$',
       };
 
       this.oauthManager = new OAuthManager(this.log, oauthConfig, storagePath);

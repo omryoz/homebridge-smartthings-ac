@@ -1,6 +1,6 @@
 {
   "displayName": "Homebridge Smartthings AC",
-  "name": "homebridge-smartthings-ac",
+  "name": "homebridge-smartthings-ac-omryoz-fork",
   "version": "2.0.9",
   "description": "Control your Samsung SmartThings AC using Homebridge.",
   "license": "Apache-2.0",

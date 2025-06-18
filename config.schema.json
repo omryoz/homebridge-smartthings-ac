@@ -5,11 +5,26 @@
   "schema": {
     "type": "object",
     "properties": {
-      "token": {
-        "title": "API Token",
+      "clientId": {
+        "title": "OAuth Client ID",
         "type": "string",
-        "required": true,
-        "default": ""
+        "description": "Client ID from your SmartThings SmartApp (OAuth method)"
+      },
+      "clientSecret": {
+        "title": "OAuth Client Secret",
+        "type": "string",
+        "description": "Client Secret from your SmartThings SmartApp (OAuth method)"
+      },
+      "redirectUri": {
+        "title": "OAuth Redirect URI",
+        "type": "string",
+        "description": "OAuth callback URL (default: https://raspberrypi.local:3000/oauth/callback)",
+        "default": "https://raspberrypi.local:3000/oauth/callback"
+      },
+      "token": {
+        "title": "API Token (Legacy)",
+        "type": "string",
+        "description": "Personal Access Token (expires every 24 hours - use OAuth instead)"
       },
       "minTemperature": {
         "title": "Minimum temperature",
@@ -34,6 +49,14 @@
         "default": 15,
         "minimum": 5
       }
-    }
+    },
+    "anyOf": [
+      {
+        "required": ["clientId", "clientSecret"]
+      },
+      {
+        "required": ["token"]
+      }
+    ]
   }
 }

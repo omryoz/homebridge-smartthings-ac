@@ -115,7 +115,9 @@ export class DeviceAdapter {
       }
 
       // Check for response errors
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if ((error as any).response) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const response = (error as any).response;
         this.log.error('HTTP Response Status:', response.status);
         this.log.error('HTTP Response Data:', JSON.stringify(response.data, null, 2));

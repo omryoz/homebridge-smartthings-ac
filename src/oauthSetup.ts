@@ -1,17 +1,22 @@
 import { Logger } from 'homebridge';
 import { OAuthManager, OAuthConfig } from './oauthManager';
 import * as http from 'http';
+import * as https from 'https';
 import * as url from 'url';
 import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 export class OAuthSetup {
-  private server: http.Server | null = null;
+  private server: http.Server | https.Server | null = null;
   private state: string;
 
   constructor(
     private readonly log: Logger,
     private readonly oauthManager: OAuthManager,
     private readonly port: number = 3000,
+    private readonly useHttps: boolean = false,
   ) {
     this.state = crypto.randomBytes(16).toString('hex');
   }
@@ -21,8 +26,7 @@ export class OAuthSetup {
    */
   async startAuthorizationFlow(): Promise<string> {
     return new Promise((resolve, reject) => {
-      // Create a simple HTTP server to handle the OAuth callback
-      this.server = http.createServer(async (req, res) => {
+      const requestHandler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
         try {
           const parsedUrl = url.parse(req.url!, true);
 
@@ -109,11 +113,31 @@ export class OAuthSetup {
           `);
           reject(error);
         }
-      });
+      };
+
+      if (this.useHttps) {
+        // Try to load SSL certificates
+        const certPath = path.join(os.homedir(), 'ssl-certs');
+        const certFile = path.join(certPath, 'cert.pem');
+        const keyFile = path.join(certPath, 'key.pem');
+
+        try {
+          const cert = fs.readFileSync(certFile);
+          const key = fs.readFileSync(keyFile);
+
+          this.server = https.createServer({ cert, key }, requestHandler);
+          this.log.info('HTTPS OAuth callback server started on port', this.port);
+        } catch (error) {
+          this.log.warn('SSL certificates not found, falling back to HTTP');
+          this.server = http.createServer(requestHandler);
+          this.log.info('HTTP OAuth callback server started on port', this.port);
+        }
+      } else {
+        this.server = http.createServer(requestHandler);
+        this.log.info('HTTP OAuth callback server started on port', this.port);
+      }
 
       this.server.listen(this.port, () => {
-        this.log.info(`OAuth callback server started on port ${this.port}`);
-
         // Generate the authorization URL
         const authUrl = this.oauthManager.generateAuthorizationUrl(this.state);
 

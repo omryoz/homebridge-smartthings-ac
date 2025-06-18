@@ -81,7 +81,7 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
       const oauthConfig: OAuthConfig = {
         clientId: clientId,
         clientSecret: clientSecret,
-        redirectUri: this.config.redirectUri || 'http://localhost:3000/oauth/callback',
+        redirectUri: this.config.redirectUri || 'https://raspberrypi.local:3000/oauth/callback',
         scope: 'r:devices:* w:devices:* x:devices:* r:locations:*',
       };
 
@@ -136,7 +136,7 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
       throw new Error('OAuth manager not initialized');
     }
 
-    this.oauthSetup = new OAuthSetup(this.log, this.oauthManager);
+    this.oauthSetup = new OAuthSetup(this.log, this.oauthManager, 3000, true);
 
     try {
       await this.oauthSetup.startAuthorizationFlow();

@@ -55,7 +55,7 @@ export class OAuthManager {
     try {
       this.log.debug('Refreshing access token...');
 
-      const response = await axios.post('https://auth-global.api.smartthings.com/oauth/token', {
+      const response = await axios.post('https://api.smartthings.com/v1/oauth/token', {
         grant_type: 'refresh_token',
         refresh_token: this.tokens.refresh_token,
         client_id: this.config.clientId,
@@ -88,7 +88,7 @@ export class OAuthManager {
     try {
       this.log.debug('Exchanging authorization code for tokens...');
 
-      const response = await axios.post('https://auth-global.api.smartthings.com/oauth/token', {
+      const response = await axios.post('https://api.smartthings.com/v1/oauth/token', {
         grant_type: 'authorization_code',
         code: authorizationCode,
         client_id: this.config.clientId,
@@ -119,6 +119,12 @@ export class OAuthManager {
    * Generate authorization URL for OAuth flow
    */
   generateAuthorizationUrl(state: string): string {
+    this.log.debug('Generating OAuth URL with:');
+    this.log.debug('  client_id:', this.config.clientId);
+    this.log.debug('  redirect_uri:', this.config.redirectUri);
+    this.log.debug('  scope:', this.config.scope);
+    this.log.debug('  state:', state);
+
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: this.config.clientId,
@@ -127,7 +133,10 @@ export class OAuthManager {
       state: state,
     });
 
-    return `https://auth-global.api.smartthings.com/oauth/authorize?${params.toString()}`;
+    const url = `https://api.smartthings.com/v1/oauth/authorize?${params.toString()}`;
+    this.log.debug('Generated OAuth URL:', url);
+
+    return url;
   }
 
   /**

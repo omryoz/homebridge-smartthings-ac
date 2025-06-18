@@ -4,33 +4,132 @@ import { PLATFORM_NAME, PLUGIN_NAME } from './settings';
 import { SmartThingsAirConditionerAccessory } from './platformAccessory';
 import { BearerTokenAuthenticator, Device, Component, CapabilityReference, SmartThingsClient } from '@smartthings/core-sdk';
 import { DeviceAdapter } from './deviceAdapter';
-
+import { OAuthManager, OAuthConfig } from './oauthManager';
+import { OAuthSetup } from './oauthSetup';
+import * as path from 'path';
+import * as os from 'os';
 
 export class SmartThingsPlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service = this.api.hap.Service;
   public readonly Characteristic: typeof Characteristic = this.api.hap.Characteristic;
 
   private readonly accessories: PlatformAccessory[] = [];
-  private readonly client: SmartThingsClient;
+  private client: SmartThingsClient | null = null;
+  private oauthManager: OAuthManager | null = null;
+  private oauthSetup: OAuthSetup | null = null;
 
   constructor(
     public readonly log: Logger,
     public readonly config: PlatformConfig,
     public readonly api: API,
   ) {
-    const token = this.config.token as string;
-    this.client = new SmartThingsClient(new BearerTokenAuthenticator(token));
+    this.initializeAuthentication();
+  }
 
-    if (token?.trim()) {
-      this.log.debug('Loading devices with token:', token);
-
-      this.api.on('didFinishLaunching', () => {
-        this.client.devices.list()
-          .then((devices: Device[]) => this.handleDevices(devices))
-          .catch(err => log.error('Cannot load devices', err));
-      });
+  private async initializeAuthentication() {
+    // Check if OAuth is configured
+    if (this.config.clientId && this.config.clientSecret) {
+      await this.initializeOAuth();
+    } else if (this.config.token) {
+      await this.initializeLegacyToken();
     } else {
-      this.log.warn('Please congigure your API token and restart homebridge.');
+      this.log.error('No authentication method configured. Please set up either OAuth (clientId/clientSecret) or a Personal Access Token (token).');
+      return;
+    }
+
+    // Load devices after authentication is set up
+    this.api.on('didFinishLaunching', () => {
+      this.loadDevices();
+    });
+  }
+
+  private async initializeOAuth() {
+    try {
+      const storagePath = path.join(os.homedir(), '.homebridge', 'smartthings-oauth-tokens.json');
+
+      const oauthConfig: OAuthConfig = {
+        clientId: this.config.clientId as string,
+        clientSecret: this.config.clientSecret as string,
+        redirectUri: this.config.redirectUri || 'http://localhost:3000/oauth/callback',
+        scope: 'x:devices:* r:devices:* l:devices',
+      };
+
+      this.oauthManager = new OAuthManager(this.log, oauthConfig, storagePath);
+      await this.oauthManager.loadTokens();
+
+      if (!this.oauthManager.hasValidTokens()) {
+        this.log.info('No valid OAuth tokens found. Starting authorization flow...');
+        await this.startOAuthFlow();
+      }
+
+      // Create SmartThings client with OAuth token
+      const accessToken = await this.oauthManager.getValidAccessToken();
+      this.client = new SmartThingsClient(new BearerTokenAuthenticator(accessToken));
+
+      this.log.info('OAuth authentication initialized successfully');
+    } catch (error) {
+      this.log.error('Failed to initialize OAuth:', error);
+    }
+  }
+
+  private async initializeLegacyToken() {
+    try {
+      const token = this.config.token as string;
+      this.client = new SmartThingsClient(new BearerTokenAuthenticator(token));
+      this.log.info('Legacy token authentication initialized');
+    } catch (error) {
+      this.log.error('Failed to initialize legacy token authentication:', error);
+    }
+  }
+
+  private async startOAuthFlow() {
+    if (!this.oauthManager) {
+      throw new Error('OAuth manager not initialized');
+    }
+
+    this.oauthSetup = new OAuthSetup(this.log, this.oauthManager);
+
+    try {
+      await this.oauthSetup.startAuthorizationFlow();
+      this.log.info('OAuth authorization completed successfully');
+
+      // Recreate client with new token
+      const accessToken = await this.oauthManager.getValidAccessToken();
+      this.client = new SmartThingsClient(new BearerTokenAuthenticator(accessToken));
+    } catch (error) {
+      this.log.error('OAuth authorization failed:', error);
+      throw error;
+    } finally {
+      this.oauthSetup?.stop();
+    }
+  }
+
+  private async loadDevices() {
+    if (!this.client) {
+      this.log.error('SmartThings client not initialized');
+      return;
+    }
+
+    try {
+      const devices = await this.client.devices.list();
+      this.handleDevices(devices);
+    } catch (error: any) {
+      this.log.error('Cannot load devices:', error);
+
+      // If using OAuth and token refresh failed, try to re-authenticate
+      if (this.oauthManager && error.response?.status === 401) {
+        this.log.info('Token expired, attempting to refresh...');
+        try {
+          const accessToken = await this.oauthManager.getValidAccessToken();
+          this.client = new SmartThingsClient(new BearerTokenAuthenticator(accessToken));
+
+          // Retry loading devices
+          const devices = await this.client.devices.list();
+          this.handleDevices(devices);
+        } catch (refreshError) {
+          this.log.error('Failed to refresh token:', refreshError);
+        }
+      }
     }
   }
 
@@ -93,13 +192,16 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
   }
 
   private createSmartThingsAccessory(accessory: PlatformAccessory<UnknownContext>, device: Device) {
+    if (!this.client) {
+      throw new Error('SmartThings client not initialized');
+    }
+
     const deviceAdapter = new DeviceAdapter(device, this.log, this.client);
     new SmartThingsAirConditionerAccessory(this, accessory, deviceAdapter);
   }
 
   configureAccessory(accessory: PlatformAccessory) {
     this.log.info('Loading accessory from cache:', accessory.displayName);
-
     this.accessories.push(accessory);
   }
 }

@@ -55,16 +55,18 @@ export class OAuthManager {
     try {
       this.log.debug('Refreshing access token...');
 
-      const response = await axios.post('https://api.smartthings.com/v1/oauth/token', {
-        grant_type: 'refresh_token',
-        refresh_token: this.tokens.refresh_token,
-        client_id: this.config.clientId,
-        client_secret: this.config.clientSecret,
-      }, {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+      const response = await axios.post('https://api.smartthings.com/v1/oauth/token',
+        new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token: this.tokens.refresh_token,
+        }).toString(),
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Authorization': 'Basic ' + Buffer.from(`${this.config.clientId}:${this.config.clientSecret}`).toString('base64'),
+          },
         },
-      });
+      );
 
       this.tokens = response.data;
       if (this.tokens) {
@@ -88,17 +90,19 @@ export class OAuthManager {
     try {
       this.log.debug('Exchanging authorization code for tokens...');
 
-      const response = await axios.post('https://api.smartthings.com/v1/oauth/token', {
-        grant_type: 'authorization_code',
-        code: authorizationCode,
-        client_id: this.config.clientId,
-        client_secret: this.config.clientSecret,
-        redirect_uri: this.config.redirectUri,
-      }, {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+      const response = await axios.post('https://api.smartthings.com/v1/oauth/token',
+        new URLSearchParams({
+          grant_type: 'authorization_code',
+          code: authorizationCode,
+          redirect_uri: this.config.redirectUri,
+        }).toString(),
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Authorization': 'Basic ' + Buffer.from(`${this.config.clientId}:${this.config.clientSecret}`).toString('base64'),
+          },
         },
-      });
+      );
 
       this.tokens = response.data;
       if (this.tokens) {

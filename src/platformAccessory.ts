@@ -124,19 +124,74 @@ export class SmartThingsAirConditionerAccessory {
   private async setActive(value: CharacteristicValue) {
     const isActive = value === 1;
 
+    this.platform.log.info('=== SET ACTIVE COMMAND START ===');
     this.platform.log.info('setActive called with value:', value, 'isActive:', isActive);
-    this.platform.log.debug('Device ID:', this.device.deviceId);
-    this.platform.log.debug('Device label:', this.device.label);
+    this.platform.log.info('Device ID:', this.device.deviceId);
+    this.platform.log.info('Device label:', this.device.label);
+    this.platform.log.info('Current device status before command:', JSON.stringify(this.deviceStatus, null, 2));
 
     try {
       this.platform.log.info('Executing command:', isActive ? 'on' : 'off', 'on capability: switch');
       await this.executeCommand(isActive ? 'on' : 'off', 'switch');
+
+      this.platform.log.info('Command executed successfully, updating local device status');
       this.deviceStatus.active = isActive;
-      this.platform.log.info('Command executed successfully, updating device status');
+
+      // Force an immediate status update to verify the change
+      this.platform.log.info('Forcing immediate status update to verify change...');
+      await this.updateStatus();
+      this.platform.log.info('Updated device status:', JSON.stringify(this.deviceStatus, null, 2));
+
+      // Force update HomeKit characteristics to reflect the actual state
+      this.platform.log.info('Updating HomeKit characteristics...');
+      this.updateHomeKitCharacteristics();
+
+      this.platform.log.info('=== SET ACTIVE COMMAND END ===');
     } catch(error) {
+      this.platform.log.error('=== SET ACTIVE COMMAND ERROR ===');
       this.platform.log.error('Cannot set device active', error);
       this.platform.log.error('Error details:', JSON.stringify(error, null, 2));
+      this.platform.log.error('Attempting to refresh device status...');
       await this.updateStatus();
+      this.updateHomeKitCharacteristics();
+      this.platform.log.error('=== SET ACTIVE COMMAND ERROR END ===');
+    }
+  }
+
+  private updateHomeKitCharacteristics() {
+    try {
+      // Update Active characteristic
+      this.service.updateCharacteristic(this.platform.Characteristic.Active, this.deviceStatus.active ? 1 : 0);
+
+      // Update Target Heater Cooler State
+      this.service.updateCharacteristic(
+        this.platform.Characteristic.TargetHeaterCoolerState,
+        this.fromSmartThingsMode(this.deviceStatus.mode),
+      );
+
+      // Update Cooling Threshold Temperature
+      this.service.updateCharacteristic(
+        this.platform.Characteristic.CoolingThresholdTemperature,
+        this.deviceStatus.targetTemperature,
+      );
+
+      // Update Current Temperature
+      this.service.updateCharacteristic(
+        this.platform.Characteristic.CurrentTemperature,
+        this.deviceStatus.currentTemperature,
+      );
+
+      // Update Current Relative Humidity if available
+      if (this.hasCapability('relativeHumidityMeasurement')) {
+        this.service.updateCharacteristic(
+          this.platform.Characteristic.CurrentRelativeHumidity,
+          this.deviceStatus.currentHumidity,
+        );
+      }
+
+      this.platform.log.info('HomeKit characteristics updated successfully');
+    } catch (error) {
+      this.platform.log.error('Failed to update HomeKit characteristics:', error);
     }
   }
 
@@ -146,9 +201,13 @@ export class SmartThingsAirConditionerAccessory {
     try {
       await this.executeCommand('setAirConditionerMode', 'airConditionerMode', [ mode ]);
       this.deviceStatus.mode = mode;
+
+      // Update HomeKit characteristics
+      this.updateHomeKitCharacteristics();
     } catch(error) {
       this.platform.log.error('Cannot set device mode', error);
       await this.updateStatus();
+      this.updateHomeKitCharacteristics();
     }
   }
 
@@ -158,9 +217,13 @@ export class SmartThingsAirConditionerAccessory {
     try {
       await this.executeCommand('setCoolingSetpoint', 'thermostatCoolingSetpoint', [targetTemperature]);
       this.deviceStatus.targetTemperature = targetTemperature;
+
+      // Update HomeKit characteristics
+      this.updateHomeKitCharacteristics();
     } catch(error) {
       this.platform.log.error('Cannot set device temperature', error);
       await this.updateStatus();
+      this.updateHomeKitCharacteristics();
     }
   }
 
@@ -188,10 +251,25 @@ export class SmartThingsAirConditionerAccessory {
 
   private async updateStatus() {
     try {
-      this.deviceStatus = await this.getStatus();
+      this.platform.log.debug('=== UPDATE STATUS START ===');
+      this.platform.log.debug('Current device status before update:', JSON.stringify(this.deviceStatus, null, 2));
+
+      const newStatus = await this.getStatus();
+      this.platform.log.debug('New status from device:', JSON.stringify(newStatus, null, 2));
+
+      // Check if status actually changed
+      const statusChanged = JSON.stringify(this.deviceStatus) !== JSON.stringify(newStatus);
+      this.platform.log.debug('Status changed:', statusChanged);
+
+      this.deviceStatus = newStatus;
+      this.platform.log.debug('Updated device status:', JSON.stringify(this.deviceStatus, null, 2));
+      this.platform.log.debug('=== UPDATE STATUS END ===');
     } catch(error: unknown) {
+      this.platform.log.error('=== UPDATE STATUS ERROR ===');
       this.platform.log.error('Error while fetching device status: ' + this.getErrorMessage(error));
+      this.platform.log.error('Error details:', JSON.stringify(error, null, 2));
       this.platform.log.debug('Caught error', error);
+      this.platform.log.error('=== UPDATE STATUS ERROR END ===');
     }
   }
 

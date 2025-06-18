@@ -124,11 +124,18 @@ export class SmartThingsAirConditionerAccessory {
   private async setActive(value: CharacteristicValue) {
     const isActive = value === 1;
 
+    this.platform.log.info('setActive called with value:', value, 'isActive:', isActive);
+    this.platform.log.debug('Device ID:', this.device.deviceId);
+    this.platform.log.debug('Device label:', this.device.label);
+
     try {
+      this.platform.log.info('Executing command:', isActive ? 'on' : 'off', 'on capability: switch');
       await this.executeCommand(isActive ? 'on' : 'off', 'switch');
       this.deviceStatus.active = isActive;
+      this.platform.log.info('Command executed successfully, updating device status');
     } catch(error) {
       this.platform.log.error('Cannot set device active', error);
+      this.platform.log.error('Error details:', JSON.stringify(error, null, 2));
       await this.updateStatus();
     }
   }

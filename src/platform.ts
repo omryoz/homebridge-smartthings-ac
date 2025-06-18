@@ -245,6 +245,23 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
       throw new Error('SmartThings client not initialized');
     }
 
+    // Log OAuth2 status for debugging
+    this.log.debug('=== OAUTH2 STATUS CHECK ===');
+    if (this.oauthManager) {
+      this.log.debug('OAuth manager is active');
+      this.log.debug('Has valid tokens:', this.oauthManager.hasValidTokens());
+
+      // Check token expiry
+      if (this.oauthManager.hasValidTokens()) {
+        this.log.debug('OAuth tokens are valid');
+      } else {
+        this.log.warn('OAuth tokens are invalid or expired');
+      }
+    } else {
+      this.log.debug('Using legacy token authentication');
+    }
+    this.log.debug('=== OAUTH2 STATUS CHECK END ===');
+
     const deviceAdapter = new DeviceAdapter(device, this.log, this.client);
     new SmartThingsAirConditionerAccessory(this, accessory, deviceAdapter);
   }

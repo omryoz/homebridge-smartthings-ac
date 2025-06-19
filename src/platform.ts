@@ -262,7 +262,7 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
     }
     this.log.debug('=== OAUTH2 STATUS CHECK END ===');
 
-    const deviceAdapter = new DeviceAdapter(device, this.log, this.client);
+    const deviceAdapter = new DeviceAdapter(device, this.log, this);
     new SmartThingsAirConditionerAccessory(this, accessory, deviceAdapter);
   }
 

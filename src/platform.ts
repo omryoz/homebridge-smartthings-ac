@@ -24,6 +24,12 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
     public readonly config: PlatformConfig,
     public readonly api: API,
   ) {
+    // Always register the didFinishLaunching handler
+    this.api.on('didFinishLaunching', () => {
+      this.loadDevices();
+    });
+
+    // Then initialize authentication
     this.initializeAuthentication();
   }
 
@@ -37,11 +43,6 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
       this.log.error('No authentication method configured. Please set up either OAuth or a Personal Access Token (token).');
       return;
     }
-
-    // Load devices after authentication is set up
-    this.api.on('didFinishLaunching', () => {
-      this.loadDevices();
-    });
   }
 
   private async initializeOAuth() {
@@ -154,13 +155,23 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
   }
 
   private async loadDevices() {
+    // Wait for authentication to complete if needed
+    let attempts = 0;
+    while (!this.client && attempts < 10) {
+      this.log.debug('Waiting for authentication to complete...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      attempts++;
+    }
+
     if (!this.client) {
-      this.log.error('SmartThings client not initialized');
+      this.log.error('SmartThings client not initialized after 10 seconds');
       return;
     }
 
     try {
+      this.log.info('🔍 Loading devices from SmartThings...');
       const devices = await this.client.devices.list();
+      this.log.info(`📱 Found ${devices.length} devices total`);
       this.handleDevices(devices);
     } catch (error: unknown) {
       this.log.error('Cannot load devices:', error);
@@ -183,19 +194,31 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
   }
 
   private handleDevices(devices: Device[]) {
+    this.log.info('🔧 Processing devices...');
+    let supportedCount = 0;
+    let skippedCount = 0;
+
     for (const device of devices) {
       if (device.components) {
         const capabilities = this.getCapabilities(device);
         const missingCapabilities = this.getMissingCapabilities(capabilities);
 
         if (device.deviceId && missingCapabilities.length === 0) {
-          this.log.info('Registering device', device.deviceId);
+          this.log.info(`✅ Registering device: ${device.label} (${device.deviceId})`);
           this.handleSupportedDevice(device);
+          supportedCount++;
         } else {
-          this.log.info('Skipping device', device.deviceId, device.label, 'Missing capabilities', missingCapabilities);
+          // eslint-disable-next-line max-len
+          this.log.info(`⏭️ Skipping device: ${device.label} (${device.deviceId}) - Missing capabilities: ${missingCapabilities.join(', ')}`);
+          skippedCount++;
         }
+      } else {
+        this.log.info(`⏭️ Skipping device: ${device.label} (${device.deviceId}) - No components`);
+        skippedCount++;
       }
     }
+
+    this.log.info(`📊 Device processing complete: ${supportedCount} supported, ${skippedCount} skipped`);
   }
 
   private getMissingCapabilities(capabilities: string[]): string[] {

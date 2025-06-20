@@ -125,7 +125,7 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
     }
   }
 
-  private async initializeLegacyToken() {
+  private initializeLegacyToken() {
     try {
       const token = this.config.token as string;
       this.client = new SmartThingsClient(new BearerTokenAuthenticator(token));
@@ -220,8 +220,10 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
               await this.forceReAuthentication();
 
               // Retry loading devices with new token
-              const devices = await this.client!.devices.list();
-              this.handleDevices(devices);
+              const devices = await this.client?.devices.list();
+              if (devices) {
+                this.handleDevices(devices);
+              }
             } catch (oauthError) {
               this.log.error('Failed to re-authenticate:', oauthError);
             }

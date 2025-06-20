@@ -98,6 +98,9 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
       const accessToken = await this.oauthManager.getValidAccessToken();
       this.client = new SmartThingsClient(new BearerTokenAuthenticator(accessToken));
 
+      // Start token refresh scheduler
+      this.startTokenRefreshScheduler();
+
       this.log.info('OAuth authentication initialized successfully');
     } catch (error) {
       this.log.error('Failed to initialize OAuth:', error);
@@ -154,6 +157,27 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
     }
   }
 
+  private async forceReAuthentication() {
+    this.log.warn('Force re-authentication required...');
+
+    if (this.oauthManager) {
+      try {
+        // Clear expired tokens
+        await this.oauthManager.clearTokens();
+        this.log.info('Cleared expired tokens');
+
+        // Start new OAuth flow
+        await this.startOAuthFlow();
+        this.log.info('Re-authentication completed successfully');
+      } catch (error) {
+        this.log.error('Failed to re-authenticate:', error);
+        throw error;
+      }
+    } else {
+      this.log.error('No OAuth manager available for re-authentication');
+    }
+  }
+
   private async loadDevices() {
     // Wait for authentication to complete if needed
     let attempts = 0;
@@ -188,6 +212,20 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
           this.handleDevices(devices);
         } catch (refreshError) {
           this.log.error('Failed to refresh token:', refreshError);
+
+          // If refresh token is also expired, we need to re-authenticate
+          if ((refreshError as { response?: { status: number } }).response?.status === 401) {
+            this.log.warn('Refresh token expired, starting new OAuth flow...');
+            try {
+              await this.forceReAuthentication();
+
+              // Retry loading devices with new token
+              const devices = await this.client!.devices.list();
+              this.handleDevices(devices);
+            } catch (oauthError) {
+              this.log.error('Failed to re-authenticate:', oauthError);
+            }
+          }
         }
       }
     }
@@ -208,7 +246,6 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
           this.handleSupportedDevice(device);
           supportedCount++;
         } else {
-          // eslint-disable-next-line max-len
           this.log.info(`⏭️ Skipping device: ${device.label} (${device.deviceId}) - Missing capabilities: ${missingCapabilities.join(', ')}`);
           skippedCount++;
         }
@@ -292,5 +329,56 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
   configureAccessory(accessory: PlatformAccessory) {
     this.log.info('Loading accessory from cache:', accessory.displayName);
     this.accessories.push(accessory);
+  }
+
+  private startTokenRefreshScheduler() {
+    if (!this.oauthManager) {
+      this.log.warn('No OAuth manager available for token refresh scheduler');
+      return;
+    }
+
+    this.log.info('🔄 Starting token refresh scheduler...');
+
+    // Refresh token every 30 minutes (1800000 ms) to ensure it never expires
+    const refreshInterval = 30 * 60 * 1000; // 30 minutes
+
+    setInterval(async () => {
+      try {
+        this.log.debug('🔄 Scheduled token refresh...');
+
+        if (this.oauthManager && this.oauthManager.hasValidTokens()) {
+          // Log current token status
+          const expiryInfo = this.oauthManager.getTokenExpiryInfo();
+          this.log.debug(`📊 Token status: expires at ${expiryInfo.expiresAt.toISOString()}, ${Math.round(expiryInfo.timeUntilExpiry / 60000)} minutes remaining`);
+
+          // Get a fresh token (this will refresh if needed)
+          const accessToken = await this.oauthManager.getValidAccessToken();
+
+          // Update the client with the new token
+          this.client = new SmartThingsClient(new BearerTokenAuthenticator(accessToken));
+
+          // Log new token status
+          const newExpiryInfo = this.oauthManager.getTokenExpiryInfo();
+          this.log.debug(`✅ Token refreshed successfully - new expiry: ${newExpiryInfo.expiresAt.toISOString()}`);
+        } else {
+          this.log.warn('⚠️ No valid tokens found during scheduled refresh');
+        }
+      } catch (error) {
+        this.log.error('❌ Scheduled token refresh failed:', error);
+
+        // If refresh fails, try to re-authenticate
+        if ((error as { response?: { status: number } }).response?.status === 401) {
+          this.log.warn('🔄 Refresh token expired, attempting re-authentication...');
+          try {
+            await this.forceReAuthentication();
+            this.log.info('✅ Re-authentication successful');
+          } catch (reauthError) {
+            this.log.error('❌ Re-authentication failed:', reauthError);
+          }
+        }
+      }
+    }, refreshInterval);
+
+    this.log.info(`🔄 Token refresh scheduler started - refreshing every ${refreshInterval / 60000} minutes`);
   }
 }

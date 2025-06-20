@@ -36,8 +36,9 @@ export class OAuthManager {
       throw new Error('No OAuth tokens available. Please complete the authorization flow first.');
     }
 
-    // Check if token is expired or will expire in the next 5 minutes
-    if (Date.now() >= this.tokenExpiry - 300000) {
+    // Check if token is expired or will expire in the next 15 minutes (more aggressive refresh)
+    if (Date.now() >= this.tokenExpiry - 900000) {
+      this.log.debug('Token expires soon, refreshing...');
       await this.refreshAccessToken();
     }
 
@@ -198,6 +199,21 @@ export class OAuthManager {
    */
   hasValidTokens(): boolean {
     return this.tokens !== null && Date.now() < this.tokenExpiry;
+  }
+
+  /**
+   * Get token expiry information
+   */
+  getTokenExpiryInfo(): { isValid: boolean; expiresAt: Date; timeUntilExpiry: number } {
+    const now = Date.now();
+    const expiresAt = new Date(this.tokenExpiry);
+    const timeUntilExpiry = this.tokenExpiry - now;
+
+    return {
+      isValid: this.hasValidTokens(),
+      expiresAt,
+      timeUntilExpiry,
+    };
   }
 
   /**

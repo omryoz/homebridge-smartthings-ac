@@ -13,8 +13,26 @@ export class DeviceAdapter {
   private async getClient(): Promise<SmartThingsClient> {
     // If using OAuth, get a fresh token
     if (this.platform['oauthManager']) {
-      const accessToken = await this.platform['oauthManager'].getValidAccessToken();
-      return new SmartThingsClient(new BearerTokenAuthenticator(accessToken));
+      try {
+        const accessToken = await this.platform['oauthManager'].getValidAccessToken();
+        return new SmartThingsClient(new BearerTokenAuthenticator(accessToken));
+      } catch (error) {
+        this.log.error('Failed to get valid access token:', error);
+
+        // If refresh token is expired, we need to re-authenticate
+        if ((error as { response?: { status: number } }).response?.status === 401) {
+          this.log.warn('Refresh token expired, starting new OAuth flow...');
+          try {
+            await this.platform['startOAuthFlow']();
+            const accessToken = await this.platform['oauthManager'].getValidAccessToken();
+            return new SmartThingsClient(new BearerTokenAuthenticator(accessToken));
+          } catch (oauthError) {
+            this.log.error('Failed to re-authenticate:', oauthError);
+            throw error; // Re-throw original error
+          }
+        }
+        throw error;
+      }
     }
 
     // If using legacy token, use the existing client

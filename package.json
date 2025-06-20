@@ -29,7 +29,7 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm run lint && npm run build",
     "preinstall": "node preinstall.js",
-    "postinstall": "npm run build"
+    "postinstall": "npm run build || echo 'Build failed, using preinstall fallback'"
   },
   "keywords": [
     "homebridge-plugin",
@@ -47,11 +47,11 @@
     "homebridge": "^1.10.0",
     "nodemon": "^2.0.7",
     "rimraf": "^3.0.2",
-    "ts-node": "^9.1.1",
-    "typescript": "^4.9.5"
+    "ts-node": "^9.1.1"
   },
   "dependencies": {
     "@smartthings/core-sdk": "^1.8.1",
-    "axios": "^1.6.0"
+    "axios": "^1.6.0",
+    "typescript": "^4.9.5"
   }
 }

@@ -19,17 +19,14 @@
   "files": [
     "dist",
     "src",
-    "tsconfig.json",
-    "preinstall.js"
+    "tsconfig.json"
   ],
   "scripts": {
     "lint": "eslint src/**.ts --max-warnings=0",
     "watch": "npm run build && npm link && nodemon",
-    "build": "rm -rf ./dist && tsc -p tsconfig.json",
-    "prepare": "npm run build",
-    "prepublishOnly": "npm run lint && npm run build",
-    "preinstall": "node preinstall.js",
-    "postinstall": "npm run build || echo 'Build failed, using preinstall fallback'"
+    "build": "rm -rf ./dist && npx tsc -p tsconfig.json",
+    "postinstall": "npm run build",
+    "prepublishOnly": "npm run lint && npm run build"
   },
   "keywords": [
     "homebridge-plugin",

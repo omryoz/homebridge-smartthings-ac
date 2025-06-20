@@ -41,8 +41,7 @@ export class SmartThingsAirConditionerAccessory {
       targetTemperature: this.platform.config.minTemperature ?? defaultMinTemperature,
     };
 
-    this.accessory.getService(this.platform.Service.AccessoryInformation)!
-      .setCharacteristic(this.platform.Characteristic.Manufacturer, this.device.manufacturerName ?? 'unknown')
+    this.accessory.getService(this.platform.Service.AccessoryInformation)?.setCharacteristic(this.platform.Characteristic.Manufacturer, this.device.manufacturerName ?? 'unknown')
       .setCharacteristic(this.platform.Characteristic.Model, this.device.name ?? 'unknown')
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.presentationId ?? 'unknown');
 
@@ -180,7 +179,7 @@ export class SmartThingsAirConditionerAccessory {
     const mode = this.toSmartThingsMode(value);
 
     try {
-      await this.executeCommand('setAirConditionerMode', 'airConditionerMode', [ mode ]);
+      await this.executeCommand('setAirConditionerMode', 'airConditionerMode', [mode]);
       this.deviceStatus.mode = mode;
 
       // Update HomeKit characteristics
@@ -210,9 +209,9 @@ export class SmartThingsAirConditionerAccessory {
 
   private toSmartThingsMode(value: CharacteristicValue): string {
     switch (value) {
-      case TargetHeaterCoolerState.HEAT: return 'heat';
-      case TargetHeaterCoolerState.COOL: return 'cool';
-      case TargetHeaterCoolerState.AUTO: return 'auto';
+    case TargetHeaterCoolerState.HEAT: return 'heat';
+    case TargetHeaterCoolerState.COOL: return 'cool';
+    case TargetHeaterCoolerState.AUTO: return 'auto';
     }
 
     this.platform.log.warn('Illegal heater-cooler state', value);
@@ -221,9 +220,9 @@ export class SmartThingsAirConditionerAccessory {
 
   private fromSmartThingsMode(state: string): CharacteristicValue {
     switch (state) {
-      case 'cool': return TargetHeaterCoolerState.COOL;
-      case 'auto': return TargetHeaterCoolerState.AUTO;
-      case 'heat': return TargetHeaterCoolerState.HEAT;
+    case 'cool': return TargetHeaterCoolerState.COOL;
+    case 'auto': return TargetHeaterCoolerState.AUTO;
+    case 'heat': return TargetHeaterCoolerState.HEAT;
     }
 
     this.platform.log.warn('Received unknown heater-cooler state', state);

@@ -24,11 +24,11 @@ export class OAuthSetup {
   /**
    * Start the OAuth authorization flow
    */
-  async startAuthorizationFlow(): Promise<string> {
+  startAuthorizationFlow(): Promise<string> {
     return new Promise((resolve, reject) => {
       const requestHandler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
         try {
-          const parsedUrl = url.parse(req.url!, true);
+          const parsedUrl = url.parse(req.url || '', true);
 
           if (parsedUrl.pathname === '/oauth/callback') {
             const { code, state, error } = parsedUrl.query;

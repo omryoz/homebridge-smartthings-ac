@@ -74,7 +74,7 @@ OAuth authentication automatically handles token refresh and provides a more sec
    Client Secret: xyz789-def0-1234-5678-9abcdef01234
    ```
 
-**Note**: If you encounter authentication issues with the CLI, you can also create a SmartApp directly through the SmartThings Developer Console at https://devworkspace.developer.samsung.com/smartthingsconsole/
+**Note**: If you encounter authentication issues with the CLI, you can also create a SmartApp directly through the SmartThings Developer Console at https://developer.smartthings.com/
 
 #### 2. Configure the Plugin
 
@@ -156,6 +156,96 @@ If you encounter issues:
 - **Authorization fails**: Make sure your redirect URI matches exactly what you configured in the SmartApp
 - **Token refresh fails**: Restart Homebridge to trigger a new authorization flow
 - **Port conflicts**: If port 3000 is in use, the plugin will show an error. Ensure the port is available.
+
+#### Token Expiration and Reauthorization Issues
+
+If you're experiencing frequent token expiration or reauthorization requests, check the following:
+
+1. **Check Token Storage Location**:
+   ```bash
+   # Common token storage locations
+   ls -la ~/.homebridge/smartthings-oauth-tokens.json
+   ls -la /home/homebridge/.homebridge/smartthings-oauth-tokens.json
+   ls -la /var/lib/homebridge/smartthings-oauth-tokens.json
+   ```
+
+2. **Verify Token File Permissions**:
+   ```bash
+   # Ensure Homebridge can read/write the token file
+   sudo chown homebridge:homebridge ~/.homebridge/smartthings-oauth-tokens.json
+   sudo chmod 600 ~/.homebridge/smartthings-oauth-tokens.json
+   ```
+
+3. **Check Token Expiry in Logs**:
+   Look for these log messages:
+   ```
+   📊 Token status: expires at [timestamp], [X] minutes remaining
+   🔄 Token expires soon, refreshing...
+   ✅ Token refreshed successfully
+   ```
+
+4. **Common Causes of Token Issues**:
+   - **Homebridge restarts**: Tokens are automatically refreshed on restart
+   - **System time changes**: Ensure your system clock is accurate
+   - **Network connectivity**: Temporary network issues can cause refresh failures
+   - **SmartThings API changes**: Samsung may update their OAuth endpoints
+
+5. **Force Reauthorization**:
+   If tokens are consistently failing, you can force a new authorization:
+   ```bash
+   # Remove existing tokens
+   rm ~/.homebridge/smartthings-oauth-tokens.json
+   
+   # Restart Homebridge
+   sudo hb-service restart
+   ```
+
+6. **Debug Token Flow**:
+   Enable debug logging in your Homebridge config:
+   ```json
+   {
+     "bridge": {
+       "name": "Homebridge",
+       "username": "CC:22:3D:E3:CE:30",
+       "port": 51826,
+       "pin": "031-45-154"
+     },
+     "accessories": [],
+     "platforms": [
+       {
+         "platform": "SmartThingsAirConditioner",
+         "name": "SmartThings Air Conditioner",
+         "clientId": "YOUR-CLIENT-ID",
+         "clientSecret": "YOUR-CLIENT-SECRET",
+         "debug": true
+       }
+     ]
+   }
+   ```
+
+7. **Check SmartThings App Configuration**:
+   - Verify your SmartApp is still active in the SmartThings Developer Console
+   - Ensure the redirect URI matches exactly: `http://localhost:3000/oauth/callback`
+   - Check that the required permissions are still granted
+
+8. **Token Refresh Scheduler**:
+   The plugin automatically refreshes tokens every 30 minutes. If you see frequent reauthorization requests, check:
+   - System resources (CPU, memory)
+   - Network connectivity to SmartThings API
+   - Homebridge log for scheduler errors
+
+#### Advanced Troubleshooting
+
+If you continue to experience issues, you can:
+
+1. **Check SmartThings API Status**: Visit https://status.smartthings.com/
+2. **Verify OAuth Scope**: Ensure your SmartApp has the correct permissions
+3. **Test API Connectivity**:
+   ```bash
+   curl -H "Authorization: Bearer YOUR-ACCESS-TOKEN" \
+        https://api.smartthings.com/v1/devices
+   ```
+4. **Monitor Network Traffic**: Use tools like Wireshark to check for network issues
 
 ### Legacy Token Renewal Process
 

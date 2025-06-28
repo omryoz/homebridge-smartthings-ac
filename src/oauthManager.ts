@@ -9,6 +9,7 @@ export interface OAuthTokens {
   expires_in: number;
   scope: string;
   token_type: string;
+  expires_at?: number;
 }
 
 export interface OAuthConfig {
@@ -71,7 +72,8 @@ export class OAuthManager {
 
       this.tokens = response.data;
       if (this.tokens) {
-        this.tokenExpiry = Date.now() + (this.tokens.expires_in * 1000);
+        this.tokens.expires_at = Date.now() + (this.tokens.expires_in * 1000);
+        this.tokenExpiry = this.tokens.expires_at;
       }
 
       // Save tokens to storage
@@ -107,7 +109,8 @@ export class OAuthManager {
 
       this.tokens = response.data;
       if (this.tokens) {
-        this.tokenExpiry = Date.now() + (this.tokens.expires_in * 1000);
+        this.tokens.expires_at = Date.now() + (this.tokens.expires_in * 1000);
+        this.tokenExpiry = this.tokens.expires_at;
       }
 
       // Save tokens to storage
@@ -165,8 +168,15 @@ export class OAuthManager {
 
       this.tokens = JSON.parse(data);
       if (this.tokens) {
-        this.tokenExpiry = Date.now() + (this.tokens.expires_in * 1000);
-        this.log.debug('OAuth tokens loaded successfully, expires at:', new Date(this.tokenExpiry));
+        if (this.tokens.expires_at) {
+          this.tokenExpiry = this.tokens.expires_at;
+          this.log.debug('OAuth tokens loaded successfully, expires at:', new Date(this.tokenExpiry));
+        } else {
+          this.tokenExpiry = Date.now() + (this.tokens.expires_in * 1000);
+          this.tokens.expires_at = this.tokenExpiry;
+          this.log.debug('OAuth tokens loaded (legacy format), expires at:', new Date(this.tokenExpiry));
+          await this.saveTokens();
+        }
       }
       this.log.debug('OAuth tokens loaded from storage');
     } catch (error) {

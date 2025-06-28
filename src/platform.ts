@@ -18,6 +18,7 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
   private client: SmartThingsClient | null = null;
   private oauthManager: OAuthManager | null = null;
   private oauthSetup: OAuthSetup | null = null;
+  private isReAuthenticating = false;
 
   constructor(
     public readonly log: Logger,
@@ -49,7 +50,33 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
     try {
       // Use a more reliable path for token storage
       const homeDir = process.env.HOME || process.env.USERPROFILE || os.homedir();
-      const storagePath = path.join(homeDir, '.homebridge', 'smartthings-oauth-tokens.json');
+      
+      // Try multiple possible Homebridge directories
+      const possiblePaths = [
+        path.join(homeDir, '.homebridge'),
+        '/home/homebridge/.homebridge',
+        '/var/lib/homebridge',
+        process.env.HOMEBRIDGE_PATH || '',
+      ].filter(p => p); // Remove empty paths
+
+      let storagePath = '';
+      for (const basePath of possiblePaths) {
+        const testPath = path.join(basePath, 'smartthings-oauth-tokens.json');
+        try {
+          await fs.access(path.dirname(testPath));
+          storagePath = testPath;
+          this.log.debug('Using token storage path:', storagePath);
+          break;
+        } catch (error) {
+          this.log.debug('Path not accessible:', testPath);
+        }
+      }
+
+      // Fallback to default if no path found
+      if (!storagePath) {
+        storagePath = path.join(homeDir, '.homebridge', 'smartthings-oauth-tokens.json');
+        this.log.debug('Using fallback token storage path:', storagePath);
+      }
 
       this.log.debug('OAuth token storage path:', storagePath);
       this.log.debug('Home directory:', homeDir);
@@ -158,10 +185,20 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
   }
 
   private async forceReAuthentication() {
+    if (this.isReAuthenticating) {
+      this.log.debug('Re-authentication already in progress, waiting...');
+      // Wait for current re-authentication to complete
+      while (this.isReAuthenticating) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      return;
+    }
+
+    this.isReAuthenticating = true;
     this.log.warn('Force re-authentication required...');
 
-    if (this.oauthManager) {
-      try {
+    try {
+      if (this.oauthManager) {
         // Clear expired tokens
         await this.oauthManager.clearTokens();
         this.log.info('Cleared expired tokens');
@@ -169,12 +206,14 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
         // Start new OAuth flow
         await this.startOAuthFlow();
         this.log.info('Re-authentication completed successfully');
-      } catch (error) {
-        this.log.error('Failed to re-authenticate:', error);
-        throw error;
+      } else {
+        this.log.error('No OAuth manager available for re-authentication');
       }
-    } else {
-      this.log.error('No OAuth manager available for re-authentication');
+    } catch (error) {
+      this.log.error('Failed to re-authenticate:', error);
+      throw error;
+    } finally {
+      this.isReAuthenticating = false;
     }
   }
 

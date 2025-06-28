@@ -23,7 +23,8 @@ export class DeviceAdapter {
         if ((error as { response?: { status: number } }).response?.status === 401) {
           this.log.warn('Refresh token expired, starting new OAuth flow...');
           try {
-            await this.platform['startOAuthFlow']();
+            // Use the centralized re-authentication method
+            await this.platform['forceReAuthentication']();
             const accessToken = await this.platform['oauthManager'].getValidAccessToken();
             return new SmartThingsClient(new BearerTokenAuthenticator(accessToken));
           } catch (oauthError) {

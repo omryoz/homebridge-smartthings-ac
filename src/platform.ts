@@ -299,63 +299,6 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
     this.log.info(`📊 Device processing complete: ${supportedCount} supported, ${skippedCount} skipped`);
   }
 
-  /**
-   * Remove device from cache and reload from SmartThings service
-   */
-  async reloadDeviceFromService(deviceId: string): Promise<void> {
-    this.log.info(`🔄 Reloading device ${deviceId} from SmartThings service...`);
-    
-    try {
-      // Find the accessory in cache
-      const accessoryIndex = this.accessories.findIndex(accessory => accessory.UUID === deviceId);
-      if (accessoryIndex === -1) {
-        this.log.warn(`Device ${deviceId} not found in cache`);
-        return;
-      }
-
-      const accessory = this.accessories[accessoryIndex];
-      this.log.debug(`Found cached accessory: ${accessory.displayName}`);
-
-      // Remove from cache
-      this.accessories.splice(accessoryIndex, 1);
-      this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
-      this.log.debug(`Removed device ${deviceId} from cache`);
-
-      // Reload device from SmartThings service
-      if (!this.client) {
-        this.log.error('SmartThings client not available for device reload');
-        return;
-      }
-
-      const freshDevice = await this.client.devices.get(deviceId);
-      this.log.debug(`Retrieved fresh device data for ${deviceId}: ${freshDevice.label}`);
-
-      // Re-register the device
-      this.handleSupportedDevice(freshDevice);
-      this.log.info(`✅ Successfully reloaded device ${deviceId} from service`);
-
-    } catch (error) {
-      this.log.error(`Failed to reload device ${deviceId} from service:`, error);
-      
-      // If reload fails, try to re-authenticate and retry
-      if ((error as { response?: { status: number } }).response?.status === 401) {
-        this.log.warn('Authentication failed during device reload, attempting re-authentication...');
-        try {
-          await this.forceReAuthentication();
-          
-          // Retry reload after re-authentication
-          if (this.client) {
-            const freshDevice = await this.client.devices.get(deviceId);
-            this.handleSupportedDevice(freshDevice);
-            this.log.info(`✅ Successfully reloaded device ${deviceId} after re-authentication`);
-          }
-        } catch (reauthError) {
-          this.log.error('Failed to re-authenticate during device reload:', reauthError);
-        }
-      }
-    }
-  }
-
   private getMissingCapabilities(capabilities: string[]): string[] {
     return SmartThingsAirConditionerAccessory.requiredCapabilities
       .filter((el) => !capabilities.includes(el));

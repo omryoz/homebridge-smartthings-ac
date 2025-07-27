@@ -288,15 +288,6 @@ export class DeviceAdapter {
                 this.log.info('Device state conflict resolved - command may have been applied despite the error');
                 this.log.debug('Device may be in a transitional state or have other constraints preventing immediate state change');
                 
-                // Reload device from SmartThings service to get fresh state
-                try {
-                  this.log.info('🔄 Reloading device from SmartThings service to get fresh state...');
-                  await this.platform['reloadDeviceFromService'](this.device.deviceId ?? '');
-                  this.log.info('✅ Device reloaded successfully');
-                } catch (reloadError) {
-                  this.log.warn('Failed to reload device from service:', reloadError);
-                }
-                
                 return; // Consider it successful, let the status refresh determine the actual state
               }
             }

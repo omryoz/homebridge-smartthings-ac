@@ -390,7 +390,9 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
         if (this.oauthManager && this.oauthManager.hasValidTokens()) {
           // Log current token status
           const expiryInfo = this.oauthManager.getTokenExpiryInfo();
+          const detailedInfo = this.oauthManager.getDetailedTokenInfo();
           this.log.debug(`📊 Token status: expires at ${expiryInfo.expiresAt.toISOString()}, ${Math.round(expiryInfo.timeUntilExpiry / 60000)} minutes remaining`);
+          this.log.debug('📊 Detailed token info:', detailedInfo);
 
           // Get a fresh token (this will refresh if needed)
           const accessToken = await this.oauthManager.getValidAccessToken();
@@ -400,9 +402,20 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
 
           // Log new token status
           const newExpiryInfo = this.oauthManager.getTokenExpiryInfo();
+          const newDetailedInfo = this.oauthManager.getDetailedTokenInfo();
           this.log.debug(`✅ Token refreshed successfully - new expiry: ${newExpiryInfo.expiresAt.toISOString()}`);
+          this.log.debug('✅ New detailed token info:', newDetailedInfo);
         } else {
           this.log.warn('⚠️ No valid tokens found during scheduled refresh');
+          
+          // Try to re-authenticate if no valid tokens
+          try {
+            this.log.info('🔄 Attempting re-authentication due to invalid tokens...');
+            await this.forceReAuthentication();
+            this.log.info('✅ Re-authentication successful');
+          } catch (reauthError) {
+            this.log.error('❌ Re-authentication failed:', reauthError);
+          }
         }
       } catch (error) {
         this.log.error('❌ Scheduled token refresh failed:', error);

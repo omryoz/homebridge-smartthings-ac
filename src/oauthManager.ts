@@ -38,9 +38,21 @@ export class OAuthManager {
     }
 
     // Check if token is expired or will expire in the next 15 minutes (more aggressive refresh)
-    if (Date.now() >= this.tokenExpiry - 900000) {
+    const timeUntilExpiry = this.tokenExpiry - Date.now();
+    const shouldRefresh = timeUntilExpiry <= 900000; // 15 minutes
+
+    this.log.debug('Token validation check:', {
+      currentTime: new Date().toISOString(),
+      tokenExpiry: new Date(this.tokenExpiry).toISOString(),
+      timeUntilExpiry: Math.round(timeUntilExpiry / 60000), // minutes
+      shouldRefresh,
+    });
+
+    if (shouldRefresh) {
       this.log.debug('Token expires soon, refreshing...');
       await this.refreshAccessToken();
+    } else {
+      this.log.debug('Token is still valid, no refresh needed');
     }
 
     return this.tokens.access_token;
@@ -56,6 +68,7 @@ export class OAuthManager {
 
     try {
       this.log.debug('Refreshing access token...');
+      this.log.debug('Current token expires at:', new Date(this.tokenExpiry).toISOString());
 
       const response = await axios.post('https://api.smartthings.com/v1/oauth/token',
         new URLSearchParams({
@@ -70,11 +83,44 @@ export class OAuthManager {
         },
       );
 
-      this.tokens = response.data;
-      if (this.tokens) {
-        this.tokens.expires_at = Date.now() + (this.tokens.expires_in * 1000);
-        this.tokenExpiry = this.tokens.expires_at;
+      // Log the response structure for debugging
+      this.log.debug('Token refresh response received:', {
+        hasAccessToken: !!response.data.access_token,
+        hasRefreshToken: !!response.data.refresh_token,
+        expiresIn: response.data.expires_in,
+        tokenType: response.data.token_type,
+        scope: response.data.scope,
+      });
+
+      // Validate the response
+      if (!response.data.access_token) {
+        throw new Error('No access token received in refresh response');
       }
+
+      // Store the old token for comparison
+      const oldAccessToken = this.tokens.access_token;
+      const oldRefreshToken = this.tokens.refresh_token;
+
+      // Update tokens with new data
+      this.tokens = {
+        access_token: response.data.access_token,
+        refresh_token: response.data.refresh_token || this.tokens.refresh_token, // Preserve old refresh token if new one not provided
+        expires_in: response.data.expires_in,
+        scope: response.data.scope,
+        token_type: response.data.token_type,
+      };
+
+      // Calculate new expiry time
+      this.tokens.expires_at = Date.now() + (this.tokens.expires_in * 1000);
+      this.tokenExpiry = this.tokens.expires_at;
+
+      // Log token changes
+      this.log.debug('Token refresh details:', {
+        accessTokenChanged: oldAccessToken !== this.tokens.access_token,
+        refreshTokenChanged: oldRefreshToken !== this.tokens.refresh_token,
+        newExpiry: new Date(this.tokenExpiry).toISOString(),
+        expiresInMinutes: Math.round(this.tokens.expires_in / 60),
+      });
 
       // Save tokens to storage
       await this.saveTokens();
@@ -82,6 +128,16 @@ export class OAuthManager {
       this.log.debug('Access token refreshed successfully');
     } catch (error) {
       this.log.error('Failed to refresh access token:', error);
+      
+      // Log more details about the error
+      if (axios.isAxiosError(error)) {
+        this.log.error('Axios error details:', {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          data: error.response?.data,
+        });
+      }
+      
       throw error;
     }
   }
@@ -209,6 +265,39 @@ export class OAuthManager {
    */
   hasValidTokens(): boolean {
     return this.tokens !== null && Date.now() < this.tokenExpiry;
+  }
+
+  /**
+   * Get detailed token information for debugging
+   */
+  getDetailedTokenInfo(): {
+    hasTokens: boolean;
+    hasValidTokens: boolean;
+    expiresAt: Date;
+    timeUntilExpiry: number;
+    timeUntilExpiryMinutes: number;
+    accessTokenLength: number;
+    refreshTokenLength: number;
+    expiresIn: number;
+    tokenType: string;
+    scope: string;
+    } {
+    const now = Date.now();
+    const expiresAt = new Date(this.tokenExpiry);
+    const timeUntilExpiry = this.tokenExpiry - now;
+
+    return {
+      hasTokens: this.tokens !== null,
+      hasValidTokens: this.hasValidTokens(),
+      expiresAt,
+      timeUntilExpiry,
+      timeUntilExpiryMinutes: Math.round(timeUntilExpiry / 60000),
+      accessTokenLength: this.tokens?.access_token?.length || 0,
+      refreshTokenLength: this.tokens?.refresh_token?.length || 0,
+      expiresIn: this.tokens?.expires_in || 0,
+      tokenType: this.tokens?.token_type || 'unknown',
+      scope: this.tokens?.scope || 'unknown',
+    };
   }
 
   /**

@@ -151,6 +151,9 @@ export class SmartThingsAirConditionerAccessory {
             this.platform.log.info(`Device is already ${actualState}, no action needed`);
           } else {
             this.platform.log.warn(`Device state conflict: requested ${requestedState}, but device is ${actualState}`);
+            
+            // If there's still a mismatch after refresh, the device might need to be reloaded from service
+            this.platform.log.info('🔄 Device state mismatch persists, device may need service reload...');
           }
           
           return; // Don't throw error, just log the conflict

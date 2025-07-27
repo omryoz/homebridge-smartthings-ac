@@ -76,6 +76,85 @@ export class DeviceAdapter {
     return client.devices.getStatus(this.device.deviceId);
   }
 
+  /**
+   * Analyze device operational state for debugging
+   */
+  private analyzeDeviceState(status: DeviceStatus): {
+    isOperational: boolean;
+    operationalState: string;
+    constraints: string[];
+    details: Record<string, unknown>;
+  } {
+    const main = status.components?.main;
+    if (!main) {
+      return {
+        isOperational: false,
+        operationalState: 'unknown',
+        constraints: ['No main component found'],
+        details: {},
+      };
+    }
+
+    const constraints: string[] = [];
+    const details: Record<string, unknown> = {};
+
+    // Check switch state
+    const switchState = main['switch']?.['switch']?.['value'];
+    details.switch = switchState;
+
+    // Check AC mode
+    const acMode = main['airConditionerMode']?.['airConditionerMode']?.['value'];
+    details.acMode = acMode;
+
+    // Check auto-cleaning mode
+    const autoCleaningMode = main['custom.autoCleaningMode']?.['autoCleaningMode']?.['value'];
+    if (autoCleaningMode && autoCleaningMode !== 'off') {
+      constraints.push(`Auto-cleaning active: ${autoCleaningMode}`);
+    }
+    details.autoCleaningMode = autoCleaningMode;
+
+    // Check energy saving operation
+    const energySavingOperation = main['custom.energyType']?.['energySavingOperation']?.['value'];
+    if (energySavingOperation && energySavingOperation !== 'off') {
+      constraints.push(`Energy saving active: ${energySavingOperation}`);
+    }
+    details.energySavingOperation = energySavingOperation;
+
+    // Check temperature
+    const temperature = main['temperatureMeasurement']?.['temperature']?.['value'];
+    details.temperature = temperature;
+
+    // Check setpoint
+    const setpoint = main['thermostatCoolingSetpoint']?.['coolingSetpoint']?.['value'];
+    details.setpoint = setpoint;
+
+    // Determine operational state
+    let operationalState = 'unknown';
+    if (switchState === 'on') {
+      operationalState = 'running';
+      if (acMode === 'off') {
+        operationalState = 'standby';
+        constraints.push('AC mode is off');
+      }
+    } else if (switchState === 'off') {
+      operationalState = 'stopped';
+    }
+
+    // Check for other operational modes
+    if (autoCleaningMode && autoCleaningMode !== 'off') {
+      operationalState = `cleaning (${autoCleaningMode})`;
+    }
+
+    const isOperational = switchState === 'on' && acMode !== 'off';
+
+    return {
+      isOperational,
+      operationalState,
+      constraints,
+      details,
+    };
+  }
+
   public async executeMainCommand(command: string, capability: string, commandArguments?: (string | number)[]) {
     if (!this.device.deviceId) {
       throw Error('Device ID must be set');
@@ -144,10 +223,19 @@ export class DeviceAdapter {
           // Try to get current device status to understand the conflict
           try {
             const currentStatus = await this.getDeviceStatus();
+            const stateAnalysis = this.analyzeDeviceState(currentStatus);
+            
             this.log.debug('Current device status during conflict:', {
               switch: currentStatus.components?.main?.['switch']?.['switch']?.['value'],
               mode: currentStatus.components?.main?.['airConditionerMode']?.['airConditionerMode']?.['value'],
               temperature: currentStatus.components?.main?.['temperatureMeasurement']?.['temperature']?.['value'],
+            });
+            
+            this.log.debug('Device state analysis:', {
+              operationalState: stateAnalysis.operationalState,
+              isOperational: stateAnalysis.isOperational,
+              constraints: stateAnalysis.constraints,
+              details: stateAnalysis.details,
             });
 
             // For switch commands, check if the device is already in the desired state
@@ -164,16 +252,41 @@ export class DeviceAdapter {
                 // Device is in a different state than requested
                 this.log.warn(`Device state conflict: requested ${command}, but device is ${currentSwitchState}`);
                 
-                // Check if there are any other constraints preventing the command
+                // Check for Samsung-specific constraints that might prevent the command
                 const acMode = currentStatus.components?.main?.['airConditionerMode']?.['airConditionerMode']?.['value'];
+                const autoCleaningMode = currentStatus.components?.main?.['custom.autoCleaningMode']?.['autoCleaningMode']?.['value'];
+                const energySavingOperation = currentStatus.components?.main?.['custom.energyType']?.['energySavingOperation']?.['value'];
+                
+                // Log all relevant device states for debugging
+                this.log.debug('Device state analysis for conflict resolution:', {
+                  switch: currentSwitchState,
+                  acMode,
+                  autoCleaningMode,
+                  energySavingOperation,
+                  hasAutoCleaning: !!currentStatus.components?.main?.['custom.autoCleaningMode'],
+                  hasEnergySaving: !!currentStatus.components?.main?.['custom.energyType'],
+                });
+                
+                // Check specific constraints
                 if (command === 'on' && acMode === 'off') {
                   this.log.warn('Cannot turn on device while AC mode is set to "off"');
                   throw new Error('Cannot turn on device: AC mode is set to "off". Please change the AC mode first.');
                 }
                 
-                // For other cases, log the conflict but don't throw an error
-                // The device might be in a transitional state or have other constraints
+                if (command === 'off' && autoCleaningMode && autoCleaningMode !== 'off') {
+                  this.log.warn(`Cannot turn off device while auto-cleaning mode is active (${autoCleaningMode})`);
+                  throw new Error(`Cannot turn off device: Auto-cleaning mode is active (${autoCleaningMode}). Please wait for cleaning to complete.`);
+                }
+                
+                if (command === 'off' && energySavingOperation && energySavingOperation !== 'off') {
+                  this.log.warn(`Cannot turn off device while energy saving operation is active (${energySavingOperation})`);
+                  throw new Error(`Cannot turn off device: Energy saving operation is active (${energySavingOperation}). Please wait for operation to complete.`);
+                }
+                
+                // For other cases, the device might be in a transitional state or have other constraints
+                // Log the conflict but don't throw an error - let the status refresh determine the actual state
                 this.log.info('Device state conflict resolved - command may have been applied despite the error');
+                this.log.debug('Device may be in a transitional state or have other constraints preventing immediate state change');
                 return; // Consider it successful, let the status refresh determine the actual state
               }
             }

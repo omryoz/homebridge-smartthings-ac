@@ -133,6 +133,33 @@ export class SmartThingsAirConditionerAccessory {
       this.updateHomeKitCharacteristics();
     } catch(error) {
       this.platform.log.error('Cannot set device active', error);
+      
+      // Check if this is a device state conflict
+      if (error instanceof Error && error.message.includes('Device state conflict')) {
+        this.platform.log.warn('Device state conflict detected. Refreshing device status...');
+        
+        // Refresh device status to get the actual state
+        try {
+          await this.updateStatus();
+          this.updateHomeKitCharacteristics();
+          
+          // Log the actual state vs requested state
+          const actualState = this.deviceStatus.active ? 'on' : 'off';
+          const requestedState = isActive ? 'on' : 'off';
+          
+          if (actualState === requestedState) {
+            this.platform.log.info(`Device is already ${actualState}, no action needed`);
+          } else {
+            this.platform.log.warn(`Device state conflict: requested ${requestedState}, but device is ${actualState}`);
+          }
+          
+          return; // Don't throw error, just log the conflict
+        } catch (statusError) {
+          this.platform.log.error('Failed to refresh device status after conflict:', statusError);
+        }
+      }
+      
+      // For other errors, update status and characteristics
       await this.updateStatus();
       this.updateHomeKitCharacteristics();
     }
@@ -186,6 +213,30 @@ export class SmartThingsAirConditionerAccessory {
       this.updateHomeKitCharacteristics();
     } catch(error) {
       this.platform.log.error('Cannot set device mode', error);
+      
+      // Check if this is a device state conflict
+      if (error instanceof Error && error.message.includes('Device state conflict')) {
+        this.platform.log.warn('Device mode conflict detected. Refreshing device status...');
+        
+        try {
+          await this.updateStatus();
+          this.updateHomeKitCharacteristics();
+          
+          const actualMode = this.deviceStatus.mode;
+          const requestedMode = mode;
+          
+          if (actualMode === requestedMode) {
+            this.platform.log.info(`Device is already in ${actualMode} mode, no action needed`);
+          } else {
+            this.platform.log.warn(`Device mode conflict: requested ${requestedMode}, but device is in ${actualMode} mode`);
+          }
+          
+          return; // Don't throw error, just log the conflict
+        } catch (statusError) {
+          this.platform.log.error('Failed to refresh device status after mode conflict:', statusError);
+        }
+      }
+      
       await this.updateStatus();
       this.updateHomeKitCharacteristics();
     }
@@ -202,6 +253,30 @@ export class SmartThingsAirConditionerAccessory {
       this.updateHomeKitCharacteristics();
     } catch(error) {
       this.platform.log.error('Cannot set device temperature', error);
+      
+      // Check if this is a device state conflict
+      if (error instanceof Error && error.message.includes('Device state conflict')) {
+        this.platform.log.warn('Device temperature conflict detected. Refreshing device status...');
+        
+        try {
+          await this.updateStatus();
+          this.updateHomeKitCharacteristics();
+          
+          const actualTemp = this.deviceStatus.targetTemperature;
+          const requestedTemp = targetTemperature;
+          
+          if (Math.abs(actualTemp - requestedTemp) < 0.5) {
+            this.platform.log.info(`Device temperature is already set to ${actualTemp}°C, no action needed`);
+          } else {
+            this.platform.log.warn(`Device temperature conflict: requested ${requestedTemp}°C, but device is set to ${actualTemp}°C`);
+          }
+          
+          return; // Don't throw error, just log the conflict
+        } catch (statusError) {
+          this.platform.log.error('Failed to refresh device status after temperature conflict:', statusError);
+        }
+      }
+      
       await this.updateStatus();
       this.updateHomeKitCharacteristics();
     }

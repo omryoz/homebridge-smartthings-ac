@@ -33,12 +33,17 @@ export class SmartThingsAirConditionerAccessory {
     private readonly deviceAdapter: DeviceAdapter,
   ) {
     this.device = accessory.context.device as Device;
+    
+    // Get temperature constraints
+    const minTemp = this.platform.config.minTemperature ?? defaultMinTemperature;
+    const maxTemp = this.platform.config.maxTemperature ?? defaultMaxTemperature;
+    
     this.deviceStatus = {
       mode: 'auto',
       active: false,
       currentHumidity: 0,
-      currentTemperature: this.platform.config.minTemperature ?? defaultMinTemperature,
-      targetTemperature: this.platform.config.minTemperature ?? defaultMinTemperature,
+      currentTemperature: minTemp, // Start with minimum temperature
+      targetTemperature: minTemp, // Start with minimum temperature
     };
 
     this.accessory.getService(this.platform.Service.AccessoryInformation)?.setCharacteristic(this.platform.Characteristic.Manufacturer, this.device.manufacturerName ?? 'unknown')
@@ -54,8 +59,8 @@ export class SmartThingsAirConditionerAccessory {
       .onGet(this.getActive.bind(this));
 
     const temperatureProperties = {
-      maxValue: this.platform.config.maxTemperature ?? defaultMaxTemperature,
-      minValue: this.platform.config.minTemperature ?? defaultMinTemperature,
+      maxValue: maxTemp,
+      minValue: minTemp,
       minStep: 1,
     };
 
@@ -105,7 +110,12 @@ export class SmartThingsAirConditionerAccessory {
   }
 
   private getCoolingTemperature(): CharacteristicValue {
-    return this.deviceStatus.targetTemperature;
+    const minTemp = this.platform.config.minTemperature ?? defaultMinTemperature;
+    const maxTemp = this.platform.config.maxTemperature ?? defaultMaxTemperature;
+    
+    // Ensure temperature is within valid range
+    const temp = Math.max(minTemp, Math.min(maxTemp, this.deviceStatus.targetTemperature));
+    return temp;
   }
 
   private getActive(): CharacteristicValue {
@@ -113,7 +123,12 @@ export class SmartThingsAirConditionerAccessory {
   }
 
   private getCurrentTemperature(): CharacteristicValue {
-    return this.deviceStatus.currentTemperature;
+    const minTemp = this.platform.config.minTemperature ?? defaultMinTemperature;
+    const maxTemp = this.platform.config.maxTemperature ?? defaultMaxTemperature;
+    
+    // Ensure temperature is within valid range
+    const temp = Math.max(minTemp, Math.min(maxTemp, this.deviceStatus.currentTemperature));
+    return temp;
   }
 
   private getCurrentHumidity(): CharacteristicValue {

@@ -85,16 +85,31 @@ export class DeviceAdapter {
     this.log.debug('Executing command', capability, command);
 
     const client = await this.getClient();
-    const status = await client.devices.executeCommand(this.device.deviceId, {
-      component: 'main',
-      command: command,
-      capability: capability,
-      arguments: commandArguments,
-    });
+    
+    try {
+      const status = await client.devices.executeCommand(this.device.deviceId, {
+        component: 'main',
+        command: command,
+        capability: capability,
+        arguments: commandArguments,
+      });
 
-    this.log.debug('Command executed with status', status.status);
-    if (status.status !== 'success') {
-      throw Error('Command failed with status ' + status.status);
+      this.log.debug('Command executed with status', status.status);
+      if (status.status !== 'success') {
+        throw Error('Command failed with status ' + status.status);
+      }
+    } catch (error) {
+      // Handle 409 Conflict - device state conflict
+      if (error && typeof error === 'object' && 'response' in error) {
+        const axiosError = error as { response?: { status: number; data?: unknown } };
+        if (axiosError.response?.status === 409) {
+          this.log.warn('Device state conflict detected. Command may have been applied despite the error.');
+          return; // Don't throw error, consider it successful
+        }
+      }
+      
+      // Re-throw other errors
+      throw error;
     }
   }
 

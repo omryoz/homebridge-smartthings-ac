@@ -92,7 +92,10 @@ export class SmartThingsAirConditionerAccessory {
     const updateInterval = this.platform.config.updateInterval ?? defaultUpdateInterval;
     this.platform.log.info('Update status every', updateInterval, 'secs');
 
+    // Force fresh status update on plugin restart
+    this.platform.log.debug('Forcing fresh status update on plugin restart');
     this.updateStatus();
+    
     setInterval(async () => {
       await this.updateStatus();
     }, updateInterval * 1000);
@@ -142,8 +145,11 @@ export class SmartThingsAirConditionerAccessory {
 
     try {
       await this.executeCommand(isActive ? 'on' : 'off', 'switch');
-      this.deviceStatus.active = isActive;
-
+      
+      // Force fresh status update to get actual device state
+      this.platform.log.debug('Command executed, updating status to get actual device state');
+      await this.updateStatus();
+      
       // Update HomeKit characteristics to reflect the actual state
       this.updateHomeKitCharacteristics();
     } catch(error) {
@@ -195,8 +201,11 @@ export class SmartThingsAirConditionerAccessory {
 
     try {
       await this.executeCommand('setAirConditionerMode', 'airConditionerMode', [mode]);
-      this.deviceStatus.mode = mode;
-
+      
+      // Force fresh status update to get actual device state
+      this.platform.log.debug('Command executed, updating status to get actual device state');
+      await this.updateStatus();
+      
       // Update HomeKit characteristics
       this.updateHomeKitCharacteristics();
     } catch(error) {
@@ -211,8 +220,11 @@ export class SmartThingsAirConditionerAccessory {
 
     try {
       await this.executeCommand('setCoolingSetpoint', 'thermostatCoolingSetpoint', [targetTemperature]);
-      this.deviceStatus.targetTemperature = targetTemperature;
-
+      
+      // Force fresh status update to get actual device state
+      this.platform.log.debug('Command executed, updating status to get actual device state');
+      await this.updateStatus();
+      
       // Update HomeKit characteristics
       this.updateHomeKitCharacteristics();
     } catch(error) {

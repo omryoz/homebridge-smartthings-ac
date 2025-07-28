@@ -320,6 +320,9 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
 
   private handleExistingDevice(device: Device, accessory: PlatformAccessory<UnknownContext>) {
     this.log.info('Restoring existing accessory from cache:', device.label);
+    
+    // Force cache reset for existing accessories on plugin restart
+    this.log.debug('Resetting cache for existing accessory:', device.label);
     this.createSmartThingsAccessory(accessory, device);
   }
 

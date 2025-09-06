@@ -10,13 +10,28 @@ A Homebridge plugin to control your Samsung SmartThings Air Conditioner.
 
 ## Installation
 
+### For Homebridge 2.0 Users
+```
+npm install -g homebridge-smartthings-ac-omryoz-fork
+```
+
+### For Homebridge 1.x Users  
 ```
 npm install -g homebridge-smartthings-ac
 ```
 
 ## Compatibility
 
-This plugin is compatible with Homebridge 1.3.0 and newer, including Homebridge 1.10.0.
+This plugin is compatible with:
+- **Homebridge 1.3.0 and newer** (including Homebridge 1.10.0)  
+- **Homebridge 2.0** (requires Node.js 18+, 20+, or 22+)
+
+### Node.js Requirements
+- **Homebridge 1.x**: Node.js 14+ 
+- **Homebridge 2.0**: Node.js 18.20.4+, 20.15.1+, or 22+
+
+### Important Note for Homebridge 2.0
+If you're using Homebridge 2.0, this plugin is fully compatible. Make sure you're running a supported Node.js version.
 
 ### Important Note for Homebridge 1.10+
 
@@ -28,6 +43,8 @@ Earlier versions may throw errors related to missing modules.
 This plugin was originally created by [0x4a616e](https://github.com/0x4a616e).
 
 Homebridge 1.10 compatibility update and OAuth implementation by [Omry Oz](https://github.com/omryoz).
+
+**Homebridge 2.0 compatibility** and Samsung AC diagnostics by [Omry Oz](https://github.com/omryoz).
 
 ## Support This Plugin
 
@@ -61,9 +78,11 @@ OAuth authentication automatically handles token refresh and provides a more sec
    - **Display Name**: `Homebridge SmartThings AC`
    - **Description**: `Homebridge plugin for SmartThings Air Conditioner control`
    - **Target URL**: Leave blank (just press Enter)
-   - **Permissions**: Select these device permissions:
+   - **Permissions**: Select these device permissions (ALL are required):
      - `r:devices:*` (Read/See all devices)
-     - `w:devices:*` (Write/Control all devices)
+     - `w:devices:*` (Write/Control all devices)  
+     - `x:devices:*` (Execute commands on devices) **← CRITICAL for AC control**
+     - `r:locations:*` (Read locations)
    - **Redirect URIs**: `http://localhost:3000/oauth/callback`
 
 4. **Save your credentials!** The CLI will output something like:
@@ -140,6 +159,16 @@ Use your `clientId` and `clientSecret` in your Homebridge config.json:
 - `updateInterval`: Status update interval in seconds (default: 15)
 - `minTemperature`: Minimum temperature allowed (default: 16)
 - `maxTemperature`: Maximum temperature allowed (default: 30)
+
+### Required OAuth Scopes
+
+When creating your SmartThings SmartApp, you MUST include all these scopes:
+- `r:devices:*` - Read device information
+- `w:devices:*` - Write device settings  
+- `x:devices:*` - Execute device commands (**Critical for AC control**)
+- `r:locations:*` - Read location information
+
+**Missing `x:devices:*` will prevent the AC from responding to commands.**
 
 ## Troubleshooting
 
@@ -269,6 +298,51 @@ Or if you're using hb-service:
 ```
 sudo hb-service add homebridge-smartthings-ac --unsafe-perm
 ```
+
+## Samsung AC Specific Issues
+
+### AC Won't Turn On Despite Successful Commands
+
+If commands appear successful but your AC doesn't turn on, check these common causes:
+
+#### 1. **Filter Maintenance Required** 
+Samsung ACs often refuse to turn on when filters need maintenance:
+- **Check filter status** - Look for filter warning lights on the AC unit
+- **Clean the dust filter** - Remove and wash the filter according to manual
+- **Reset filter counter** - Use the AC remote to reset filter usage counter
+
+#### 2. **Device State Issues**
+- **Physical power switch** - Ensure the AC's main power switch is on
+- **Manual override** - Try turning on the AC with the physical remote first
+- **Error conditions** - Check for error codes on the AC display
+
+#### 3. **SmartThings 409 Errors Are Normal**
+The plugin properly handles SmartThings 409 "ConflictError" responses:
+- ✅ **409 responses indicate the command was processed**
+- ✅ **This is expected behavior for Samsung devices**
+- ❌ **Only worry if you get 401, 403, or 404 errors**
+
+#### 4. **Diagnostic Commands**
+To check your AC's detailed status, you can run diagnostic commands:
+
+```bash
+# Check device capabilities and status
+curl -H "Authorization: Bearer YOUR-ACCESS-TOKEN" \
+     https://api.smartthings.com/v1/devices/YOUR-DEVICE-ID/status
+```
+
+Look for these key indicators:
+- `dustFilterStatus: "wash"` - Filter needs cleaning
+- `dustFilterUsage: 100` - Filter at capacity
+- `switch.switch.value: "off"` - Current power state
+- `remoteControlEnabled: "true"` - Remote control is working
+
+### Testing AC Control
+
+1. **Test with SmartThings App** - Try controlling via Samsung SmartThings mobile app
+2. **Manual Override** - Use physical remote to turn on AC first
+3. **Check HomeKit** - Try controlling through HomeKit after manual turn-on
+4. **Monitor Logs** - Check Homebridge logs for detailed error information
 
 ## Development
 

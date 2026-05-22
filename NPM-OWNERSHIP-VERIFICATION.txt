@@ -1,0 +1,26 @@
+NPM PACKAGE OWNERSHIP VERIFICATION
+==================================
+
+I confirm that I — omryo on npm (https://www.npmjs.com/~omryo),
+omryoz on GitHub (https://github.com/omryoz) — am the person who
+originally published the following package to npm:
+
+  Package: homebridge-smartthings-ac-omryoz-fork
+  URL:     https://www.npmjs.com/package/homebridge-smartthings-ac-omryoz-fork
+
+It was published under my former work npm account "omryograppa"
+(omryo@grappa.xyz). That mailbox no longer exists, so I cannot
+recover the account through npm's normal password reset flow.
+
+This file is committed to the package's canonical source repository,
+which I control:
+
+  https://github.com/omryoz/homebridge-smartthings-ac
+
+I am requesting npm support transfer ownership of the package to
+my current personal npm account:
+
+  Target account: omryo
+
+Filed: 2026-05-23
+Signed: Omry Oz

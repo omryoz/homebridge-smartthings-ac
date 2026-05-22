@@ -2,6 +2,9 @@ import { ComponentStatus, Device, DeviceStatus, SmartThingsClient, BearerTokenAu
 import { Logger } from 'homebridge';
 import { PlatformStatusInfo } from './platformStatusInfo';
 import { SmartThingsPlatform } from './platform';
+import { AuthRequiredError } from './oauthManager';
+
+export { AuthRequiredError };
 
 // SmartThings API best practices constants
 const SMARTTHINGS_API_CONSTANTS = {
@@ -35,32 +38,25 @@ export class DeviceAdapter {
   ) {}
 
   private async getClient(): Promise<SmartThingsClient> {
-    // If using OAuth, get a fresh token
+    // OAuth path: ask OAuthManager for a current token. It handles refresh,
+    // retry, and deduplication. AuthRequiredError bubbles up — the accessory
+    // layer turns that into a HomeKit "No Response" rather than retrying
+    // here (which would just hammer a known-broken state).
     if (this.platform['oauthManager']) {
       try {
         const accessToken = await this.platform['oauthManager'].getValidAccessToken();
         return new SmartThingsClient(new BearerTokenAuthenticator(accessToken));
       } catch (error) {
-        this.log.error('Failed to get valid access token:', error);
-
-        // If refresh token is expired, we need to re-authenticate
-        if ((error as { response?: { status: number } }).response?.status === 401) {
-          this.log.warn('Refresh token expired, starting new OAuth flow...');
-          try {
-            // Use the centralized re-authentication method
-            await this.platform['forceReAuthentication']();
-            const accessToken = await this.platform['oauthManager'].getValidAccessToken();
-            return new SmartThingsClient(new BearerTokenAuthenticator(accessToken));
-          } catch (oauthError) {
-            this.log.error('Failed to re-authenticate:', oauthError);
-            throw error; // Re-throw original error
-          }
+        if (error instanceof AuthRequiredError) {
+          this.platform.reportAuthRequired(error.message);
+          throw error;
         }
+        this.log.warn('Failed to obtain access token:', error);
         throw error;
       }
     }
 
-    // If using legacy token, use the existing client
+    // Legacy PAT path
     if (this.platform['client']) {
       return this.platform['client'];
     }

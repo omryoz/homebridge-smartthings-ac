@@ -4,11 +4,16 @@ import { PLATFORM_NAME, PLUGIN_NAME } from './settings';
 import { SmartThingsAirConditionerAccessory } from './platformAccessory';
 import { BearerTokenAuthenticator, Device, Component, CapabilityReference, SmartThingsClient } from '@smartthings/core-sdk';
 import { DeviceAdapter } from './deviceAdapter';
-import { OAuthManager, OAuthConfig } from './oauthManager';
+import { OAuthManager, OAuthConfig, AuthRequiredError } from './oauthManager';
 import { OAuthSetup } from './oauthSetup';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs/promises';
+
+export type AuthState = 'ok' | 'refreshing' | 'broken';
+
+const AUTH_REQUIRED_LOG_INTERVAL_MS = 60 * 60 * 1000; // once per hour
+const REFRESH_FALLBACK_INTERVAL_MS = 30 * 60 * 1000;  // safety net if scheduling math fails
 
 export class SmartThingsPlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service = this.api.hap.Service;
@@ -19,6 +24,9 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
   private oauthManager: OAuthManager | null = null;
   private oauthSetup: OAuthSetup | null = null;
   private isReAuthenticating = false;
+  private authState: AuthState = 'ok';
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastAuthRequiredLog = 0;
 
   constructor(
     public readonly log: Logger,
@@ -116,22 +124,67 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
       this.oauthManager = new OAuthManager(this.log, oauthConfig, storagePath);
       await this.oauthManager.loadTokens();
 
-      if (!this.oauthManager.hasValidTokens()) {
-        this.log.info('No valid OAuth tokens found. Starting authorization flow...');
-        await this.startOAuthFlow();
+      // Try to obtain a valid access token (will refresh transparently if needed).
+      // Only fall back to the interactive OAuth flow if refresh is impossible
+      // (no tokens on disk, or refresh_token has been revoked).
+      let accessToken: string;
+      try {
+        accessToken = await this.oauthManager.getValidAccessToken();
+        this.setAuthState('ok');
+      } catch (error) {
+        if (error instanceof AuthRequiredError) {
+          this.log.info(`OAuth re-authorization required (${error.reason}). Starting authorization flow...`);
+          await this.startOAuthFlow();
+          accessToken = await this.oauthManager.getValidAccessToken();
+          this.setAuthState('ok');
+        } else {
+          throw error;
+        }
       }
 
-      // Create SmartThings client with OAuth token
-      const accessToken = await this.oauthManager.getValidAccessToken();
       this.client = new SmartThingsClient(new BearerTokenAuthenticator(accessToken));
 
-      // Start token refresh scheduler
-      this.startTokenRefreshScheduler();
+      // Start token refresh scheduler (re-arms itself based on actual expiry)
+      this.scheduleNextRefresh();
 
       this.log.info('OAuth authentication initialized successfully');
     } catch (error) {
       this.log.error('Failed to initialize OAuth:', error);
     }
+  }
+
+  /**
+   * Public accessor for accessories to read current auth state.
+   * When 'broken', accessory characteristic handlers should report
+   * SERVICE_COMMUNICATION_FAILURE so HomeKit shows "No Response".
+   */
+  public getAuthState(): AuthState {
+    return this.authState;
+  }
+
+  private setAuthState(state: AuthState) {
+    if (this.authState === state) {
+      return;
+    }
+    this.log.info(`Auth state: ${this.authState} -> ${state}`);
+    this.authState = state;
+  }
+
+  /**
+   * Loud log when re-auth is genuinely required. Rate-limited so we don't
+   * spam Homebridge logs on every poll.
+   */
+  public reportAuthRequired(reason: string) {
+    this.setAuthState('broken');
+    const now = Date.now();
+    if (now - this.lastAuthRequiredLog < AUTH_REQUIRED_LOG_INTERVAL_MS) {
+      return;
+    }
+    this.lastAuthRequiredLog = now;
+    this.log.error('=== SmartThings re-authorization required ===');
+    this.log.error(`Reason: ${reason}`);
+    this.log.error('Restart Homebridge or use the OAuth setup flow to re-authorize the plugin.');
+    this.log.error('=============================================');
   }
 
   private async checkForExistingTokens() {
@@ -187,7 +240,6 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
   private async forceReAuthentication() {
     if (this.isReAuthenticating) {
       this.log.debug('Re-authentication already in progress, waiting...');
-      // Wait for current re-authentication to complete
       while (this.isReAuthenticating) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
@@ -198,17 +250,18 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
     this.log.warn('Force re-authentication required...');
 
     try {
-      if (this.oauthManager) {
-        // Clear expired tokens
-        await this.oauthManager.clearTokens();
-        this.log.info('Cleared expired tokens');
-
-        // Start new OAuth flow
-        await this.startOAuthFlow();
-        this.log.info('Re-authentication completed successfully');
-      } else {
+      if (!this.oauthManager) {
         this.log.error('No OAuth manager available for re-authentication');
+        return;
       }
+
+      // IMPORTANT: do NOT clear existing tokens. startOAuthFlow may fail
+      // (user doesn't visit the URL, server can't bind, etc.) — in that
+      // case we want to keep whatever we had so the next refresh attempt
+      // can still succeed once SmartThings recovers.
+      await this.startOAuthFlow();
+      this.setAuthState('ok');
+      this.log.info('Re-authentication completed successfully');
     } catch (error) {
       this.log.error('Failed to re-authenticate:', error);
       throw error;
@@ -239,33 +292,21 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
     } catch (error: unknown) {
       this.log.error('Cannot load devices:', error);
 
-      // If using OAuth and token refresh failed, try to re-authenticate
+      // On 401, the stored client is using an expired token. Ask OAuthManager
+      // for a fresh one (handles refresh + dedup) and retry once. If refresh
+      // itself proves the user needs to re-authorize, surface that loudly
+      // instead of silently triggering an interactive flow at startup.
       if (this.oauthManager && (error as { response?: { status: number } }).response?.status === 401) {
-        this.log.info('Token expired, attempting to refresh...');
         try {
           const accessToken = await this.oauthManager.getValidAccessToken();
           this.client = new SmartThingsClient(new BearerTokenAuthenticator(accessToken));
-
-          // Retry loading devices
           const devices = await this.client.devices.list();
           this.handleDevices(devices);
         } catch (refreshError) {
-          this.log.error('Failed to refresh token:', refreshError);
-
-          // If refresh token is also expired, we need to re-authenticate
-          if ((refreshError as { response?: { status: number } }).response?.status === 401) {
-            this.log.warn('Refresh token expired, starting new OAuth flow...');
-            try {
-              await this.forceReAuthentication();
-
-              // Retry loading devices with new token
-              const devices = await this.client?.devices.list();
-              if (devices) {
-                this.handleDevices(devices);
-              }
-            } catch (oauthError) {
-              this.log.error('Failed to re-authenticate:', oauthError);
-            }
+          if (refreshError instanceof AuthRequiredError) {
+            this.reportAuthRequired(refreshError.message);
+          } else {
+            this.log.error('Failed to recover device list after 401:', refreshError);
           }
         }
       }
@@ -375,67 +416,60 @@ export class SmartThingsPlatform implements DynamicPlatformPlugin {
     this.accessories.push(accessory);
   }
 
-  private startTokenRefreshScheduler() {
+  /**
+   * Schedule the next token refresh based on actual expiry rather than a
+   * fixed interval. Re-arms itself after each run. OAuthManager handles
+   * deduplication, retries, and skips the API call if the margin hasn't
+   * been crossed yet — so it's safe to call refreshNow() unconditionally.
+   */
+  private scheduleNextRefresh() {
     if (!this.oauthManager) {
       this.log.warn('No OAuth manager available for token refresh scheduler');
       return;
     }
 
-    this.log.info('🔄 Starting token refresh scheduler...');
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
 
-    // Refresh token every 30 minutes (1800000 ms) to ensure it never expires
-    const refreshInterval = 30 * 60 * 1000; // 30 minutes
+    const expiry = this.oauthManager.getTokenExpiryInfo();
+    // Fire ~5 minutes before the OAuthManager's own refresh margin (1h),
+    // so we're well ahead of expiry. Clamp to [1 min, 30 min].
+    const desiredLeadMs = 65 * 60 * 1000;
+    const rawDelay = expiry.timeUntilExpiry - desiredLeadMs;
+    const delay = Math.max(60_000, Math.min(REFRESH_FALLBACK_INTERVAL_MS, rawDelay));
 
-    setInterval(async () => {
-      try {
-        this.log.debug('🔄 Scheduled token refresh...');
+    this.log.debug(`Next scheduled refresh in ${Math.round(delay / 60000)} min ` +
+      `(token expires ${expiry.expiresAt.toISOString()})`);
 
-        if (this.oauthManager && this.oauthManager.hasValidTokens()) {
-          // Log current token status
-          const expiryInfo = this.oauthManager.getTokenExpiryInfo();
-          const detailedInfo = this.oauthManager.getDetailedTokenInfo();
-          this.log.debug(`📊 Token status: expires at ${expiryInfo.expiresAt.toISOString()}, ${Math.round(expiryInfo.timeUntilExpiry / 60000)} minutes remaining`);
-          this.log.debug('📊 Detailed token info:', detailedInfo);
+    this.refreshTimer = setTimeout(() => this.runScheduledRefresh(), delay);
+  }
 
-          // Get a fresh token (this will refresh if needed)
-          const accessToken = await this.oauthManager.getValidAccessToken();
-
-          // Update the client with the new token
-          this.client = new SmartThingsClient(new BearerTokenAuthenticator(accessToken));
-
-          // Log new token status
-          const newExpiryInfo = this.oauthManager.getTokenExpiryInfo();
-          const newDetailedInfo = this.oauthManager.getDetailedTokenInfo();
-          this.log.debug(`✅ Token refreshed successfully - new expiry: ${newExpiryInfo.expiresAt.toISOString()}`);
-          this.log.debug('✅ New detailed token info:', newDetailedInfo);
-        } else {
-          this.log.warn('⚠️ No valid tokens found during scheduled refresh');
-          
-          // Try to re-authenticate if no valid tokens
-          try {
-            this.log.info('🔄 Attempting re-authentication due to invalid tokens...');
-            await this.forceReAuthentication();
-            this.log.info('✅ Re-authentication successful');
-          } catch (reauthError) {
-            this.log.error('❌ Re-authentication failed:', reauthError);
-          }
-        }
-      } catch (error) {
-        this.log.error('❌ Scheduled token refresh failed:', error);
-
-        // If refresh fails, try to re-authenticate
-        if ((error as { response?: { status: number } }).response?.status === 401) {
-          this.log.warn('🔄 Refresh token expired, attempting re-authentication...');
-          try {
-            await this.forceReAuthentication();
-            this.log.info('✅ Re-authentication successful');
-          } catch (reauthError) {
-            this.log.error('❌ Re-authentication failed:', reauthError);
-          }
-        }
+  private async runScheduledRefresh() {
+    if (!this.oauthManager) {
+      return;
+    }
+    try {
+      this.setAuthState('refreshing');
+      await this.oauthManager.refreshNow();
+      const accessToken = await this.oauthManager.getValidAccessToken();
+      this.client = new SmartThingsClient(new BearerTokenAuthenticator(accessToken));
+      this.setAuthState('ok');
+      this.log.debug('Scheduled token refresh succeeded');
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        this.reportAuthRequired(error.message);
+        // Do NOT call forceReAuthentication automatically — it requires user
+        // interaction. The user must visit the OAuth URL or restart with
+        // a fresh setup. We keep retrying on the schedule in case the user
+        // resolves it externally.
+      } else {
+        // Transient — keep tokens, try again on the next tick.
+        this.log.warn('Scheduled token refresh failed (transient); will retry on next cycle:', error);
       }
-    }, refreshInterval);
-
-    this.log.info(`🔄 Token refresh scheduler started - refreshing every ${refreshInterval / 60000} minutes`);
+    } finally {
+      this.scheduleNextRefresh();
+    }
   }
 }

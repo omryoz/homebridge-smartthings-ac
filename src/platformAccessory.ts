@@ -3,6 +3,7 @@ import { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 import { DeviceAdapter } from './deviceAdapter';
 import { SmartThingsPlatform } from './platform';
 import { PlatformStatusInfo } from './platformStatusInfo';
+import { AuthRequiredError } from './oauthManager';
 
 const defaultUpdateInterval = 15;
 const defaultMinTemperature = 16;
@@ -19,6 +20,7 @@ export class SmartThingsAirConditionerAccessory {
   private device: Device;
 
   private deviceStatus: PlatformStatusInfo;
+  private responsive = true;
 
   public static readonly requiredCapabilities = [
     'switch',
@@ -109,32 +111,35 @@ export class SmartThingsAirConditionerAccessory {
   }
 
   private getHeaterCoolerState():CharacteristicValue {
+    this.assertResponsive();
     return this.fromSmartThingsMode(this.deviceStatus.mode);
   }
 
   private getCoolingTemperature(): CharacteristicValue {
+    this.assertResponsive();
     const minTemp = this.platform.config.minTemperature ?? defaultMinTemperature;
     const maxTemp = this.platform.config.maxTemperature ?? defaultMaxTemperature;
-    
-    // Ensure temperature is within valid range
+
     const temp = Math.max(minTemp, Math.min(maxTemp, this.deviceStatus.targetTemperature));
     return temp;
   }
 
   private getActive(): CharacteristicValue {
+    this.assertResponsive();
     return this.deviceStatus.active;
   }
 
   private getCurrentTemperature(): CharacteristicValue {
+    this.assertResponsive();
     const minTemp = this.platform.config.minTemperature ?? defaultMinTemperature;
     const maxTemp = this.platform.config.maxTemperature ?? defaultMaxTemperature;
-    
-    // Ensure temperature is within valid range
+
     const temp = Math.max(minTemp, Math.min(maxTemp, this.deviceStatus.currentTemperature));
     return temp;
   }
 
   private getCurrentHumidity(): CharacteristicValue {
+    this.assertResponsive();
     return this.deviceStatus.currentHumidity;
   }
 
@@ -259,10 +264,30 @@ export class SmartThingsAirConditionerAccessory {
   private async updateStatus() {
     try {
       this.deviceStatus = await this.getStatus();
+      // Successful read — recover from any previous "No Response" state.
+      this.responsive = true;
     } catch(error: unknown) {
+      // Auth-broken state: surface as HomeKit "No Response" so the user
+      // notices instead of seeing stale data forever.
+      if (error instanceof AuthRequiredError || this.platform.getAuthState() === 'broken') {
+        this.responsive = false;
+      }
       this.platform.log.error('Error while fetching device status: ' + this.getErrorMessage(error));
       this.platform.log.debug('Caught error', error);
     }
+  }
+
+  /**
+   * Throw a HAP status error so HomeKit shows the accessory as "No Response".
+   * Called from every onGet handler when we know we can't trust our cache.
+   */
+  private assertResponsive(): void {
+    if (this.responsive && this.platform.getAuthState() !== 'broken') {
+      return;
+    }
+    throw new this.platform.api.hap.HapStatusError(
+      this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+    );
   }
 
   private getErrorMessage(error: unknown): string {

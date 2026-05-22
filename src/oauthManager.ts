@@ -19,9 +19,25 @@ export interface OAuthConfig {
   scope: string;
 }
 
+export type AuthRequiredReason = 'no_tokens' | 'invalid_grant' | 'no_refresh_token';
+
+export class AuthRequiredError extends Error {
+  constructor(public readonly reason: AuthRequiredReason, message: string) {
+    super(message);
+    this.name = 'AuthRequiredError';
+  }
+}
+
+// Refresh proactively this long before access-token expiry.
+const REFRESH_MARGIN_MS = 60 * 60 * 1000; // 1 hour
+// Single-attempt retry tuning for the /oauth/token call.
+const REFRESH_MAX_ATTEMPTS = 3;
+const REFRESH_BASE_BACKOFF_MS = 1000;
+
 export class OAuthManager {
   private tokens: OAuthTokens | null = null;
   private tokenExpiry = 0;
+  private refreshInflight: Promise<void> | null = null;
 
   constructor(
     private readonly log: Logger,
@@ -30,32 +46,111 @@ export class OAuthManager {
   ) {}
 
   /**
-   * Get a valid access token, refreshing if necessary
+   * Get a valid access token, refreshing if necessary.
+   * Throws AuthRequiredError only when a real user-driven re-authorization is needed.
    */
   async getValidAccessToken(): Promise<string> {
+    // Defensive: if memory was lost but the file is still good, recover from disk.
     if (!this.tokens) {
-      throw new Error('No OAuth tokens available. Please complete the authorization flow first.');
+      this.log.debug('In-memory tokens are null; attempting disk reload');
+      await this.loadTokens();
+    }
+    if (!this.tokens) {
+      throw new AuthRequiredError(
+        'no_tokens',
+        'No OAuth tokens available. Please complete the authorization flow first.',
+      );
     }
 
-    // Check if token is expired or will expire in the next 15 minutes (more aggressive refresh)
     const timeUntilExpiry = this.tokenExpiry - Date.now();
-    const shouldRefresh = timeUntilExpiry <= 900000; // 15 minutes
+    const shouldRefresh = timeUntilExpiry <= REFRESH_MARGIN_MS;
 
     this.log.debug('Token validation check:', {
       currentTime: new Date().toISOString(),
       tokenExpiry: new Date(this.tokenExpiry).toISOString(),
-      timeUntilExpiry: Math.round(timeUntilExpiry / 60000), // minutes
+      timeUntilExpiryMinutes: Math.round(timeUntilExpiry / 60000),
       shouldRefresh,
     });
 
     if (shouldRefresh) {
-      this.log.debug('Token expires soon, refreshing...');
-      await this.refreshAccessToken();
-    } else {
-      this.log.debug('Token is still valid, no refresh needed');
+      await this.ensureRefresh();
     }
 
+    // tokens may have been replaced by refresh
+    if (!this.tokens) {
+      throw new AuthRequiredError('no_tokens', 'OAuth tokens unexpectedly null after refresh');
+    }
     return this.tokens.access_token;
+  }
+
+  /**
+   * Force a refresh now (used by the scheduler). Same dedup as getValidAccessToken.
+   */
+  async refreshNow(): Promise<void> {
+    await this.ensureRefresh();
+  }
+
+  /**
+   * Return the existing in-flight refresh promise, or start a new one.
+   * Multiple concurrent callers share the same refresh — never two parallel
+   * POSTs to /oauth/token with the same refresh_token.
+   */
+  private ensureRefresh(): Promise<void> {
+    if (!this.refreshInflight) {
+      this.refreshInflight = this.refreshWithRetry().finally(() => {
+        this.refreshInflight = null;
+      });
+    }
+    return this.refreshInflight;
+  }
+
+  /**
+   * Retry the refresh on transient errors only. invalid_grant short-circuits
+   * to AuthRequiredError immediately — no point retrying a revoked token.
+   */
+  private async refreshWithRetry(): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= REFRESH_MAX_ATTEMPTS; attempt++) {
+      try {
+        await this.refreshAccessToken();
+        return;
+      } catch (error) {
+        lastError = error;
+
+        if (this.isInvalidGrant(error)) {
+          this.log.error('Refresh token rejected by SmartThings (invalid_grant) — re-authorization required');
+          throw new AuthRequiredError(
+            'invalid_grant',
+            'SmartThings refresh token is no longer valid. Please re-authorize the plugin.',
+          );
+        }
+
+        if (attempt < REFRESH_MAX_ATTEMPTS) {
+          const backoff = REFRESH_BASE_BACKOFF_MS * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 250);
+          this.log.warn(`Token refresh attempt ${attempt} failed; retrying in ${backoff}ms`);
+          await new Promise(resolve => setTimeout(resolve, backoff));
+        }
+      }
+    }
+    this.log.error(`Token refresh failed after ${REFRESH_MAX_ATTEMPTS} attempts — keeping existing tokens`);
+    throw lastError;
+  }
+
+  /**
+   * RFC 6749 §5.2: invalid_grant means the refresh token is no longer valid.
+   * SmartThings returns this with HTTP 400 (sometimes 401) and a body of
+   * { error: 'invalid_grant', error_description: '...' }.
+   */
+  private isInvalidGrant(error: unknown): boolean {
+    if (!axios.isAxiosError(error) || !error.response) {
+      return false;
+    }
+    const status = error.response.status;
+    if (status !== 400 && status !== 401) {
+      return false;
+    }
+    const data = error.response.data as { error?: string } | undefined;
+    return data?.error === 'invalid_grant';
   }
 
   /**
@@ -127,17 +222,15 @@ export class OAuthManager {
 
       this.log.debug('Access token refreshed successfully');
     } catch (error) {
-      this.log.error('Failed to refresh access token:', error);
-      
-      // Log more details about the error
+      // Per-attempt detail at debug; refreshWithRetry surfaces the final outcome.
+      this.log.debug('Refresh attempt failed:', error);
       if (axios.isAxiosError(error)) {
-        this.log.error('Axios error details:', {
+        this.log.debug('Axios error details:', {
           status: error.response?.status,
           statusText: error.response?.statusText,
           data: error.response?.data,
         });
       }
-      
       throw error;
     }
   }
@@ -236,7 +329,8 @@ export class OAuthManager {
       }
       this.log.debug('OAuth tokens loaded from storage');
     } catch (error) {
-      this.log.debug('No stored OAuth tokens found:', error);
+      // Real failure: file existed (fs.access succeeded) but read/parse failed.
+      this.log.warn('OAuth token file is unreadable or corrupt:', error);
     }
   }
 
